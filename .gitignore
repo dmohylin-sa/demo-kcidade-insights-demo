@@ -1,0 +1,9 @@
+node_modules
+dist
+*.tsbuildinfo
+
+# internal estimate notes for the presenter panel: never pushed
+src/data/internal-notes.ts
+# single-file build for local use
+dist-single
+.env*
