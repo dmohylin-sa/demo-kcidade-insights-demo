@@ -9,8 +9,10 @@ import {
   LockOutlined,
   BarChartOutlined,
   TableOutlined,
+  RobotOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
-import { chart, STATUS_META, type Status } from '../data/registry';
+import { chart, STATUS_META, LAYER_META, SOURCE_META, layersOf, sourcesOf, type Status, type Layer, type ChartDef } from '../data/registry';
 import { useStore } from '../lib/store';
 import { INK } from '../lib/palette';
 
@@ -20,7 +22,62 @@ const STATUS_ICON: Record<Status, ReactNode> = {
   survey: <FormOutlined />,
   profile: <IdcardOutlined />,
   cop: <TeamOutlined />,
+  ai: <RobotOutlined />,
+  evidence: <AuditOutlined />,
 };
+
+export function layerTitle(l: Layer): string {
+  const m = LAYER_META[l];
+  return `${m.kind} ${m.n} · ${m.name}`;
+}
+
+/** One evidence layer: a numbered chip; Layer 5 (collected by people) has a dashed outline. */
+export function LayerChip({ layer, compact, sources }: { layer: Layer; compact?: boolean; sources?: string[] }) {
+  const m = LAYER_META[layer];
+  const tip = (
+    <div style={{ fontSize: 12 }}>
+      <div style={{ fontWeight: 700 }}>{layerTitle(layer)}</div>
+      <div style={{ opacity: 0.85 }}>{m.what}</div>
+      {sources?.length ? <div style={{ marginTop: 4 }}>Here from: {sources.join(', ')}</div> : null}
+      {m.byPeople ? <div style={{ marginTop: 4, opacity: 0.85 }}>Collected by people, not by the platform.</div> : null}
+    </div>
+  );
+  return (
+    <Tooltip title={tip}>
+      <span className={`layer-chip${compact ? ' compact' : ''}${m.byPeople ? ' by-people' : ''}`} style={{ borderColor: `${m.color}66` }} aria-label={layerTitle(layer)}>
+        <span className="layer-num" style={{ background: m.color }}>
+          {m.n}
+        </span>
+        {compact ? null : <span className="layer-name">{m.short}</span>}
+      </span>
+    </Tooltip>
+  );
+}
+
+/** The evidence row under a chart title: the layers the chart draws on, and its sources. */
+export function EvidenceRow({ c, compact }: { c: ChartDef; compact?: boolean }) {
+  const mode = useStore((s) => s.mode);
+  const srcs = sourcesOf(c, mode);
+  const layers = layersOf(c, mode);
+  const byLayer = (l: Layer) => srcs.filter((k) => SOURCE_META[k].layer === l).map((k) => SOURCE_META[k].label);
+  if (compact) {
+    return (
+      <span className="evidence-compact">
+        {layers.map((l) => (
+          <LayerChip key={l} layer={l} compact sources={byLayer(l)} />
+        ))}
+      </span>
+    );
+  }
+  return (
+    <div className="evidence-row">
+      {layers.map((l) => (
+        <LayerChip key={l} layer={l} sources={byLayer(l)} />
+      ))}
+      <span className="src-list">{srcs.map((k) => SOURCE_META[k].label).join(' · ')}</span>
+    </div>
+  );
+}
 
 export function DataBadge({ status }: { status: Status }) {
   const m = STATUS_META[status];
@@ -83,6 +140,7 @@ export function ChartCard({ id, children, table, note, extra }: ChartCardProps) 
         <div>
           <div className="chart-title">{c.title}</div>
           <div className="chart-question">{c.question}</div>
+          <EvidenceRow c={c} />
         </div>
       }
       extra={
@@ -147,15 +205,18 @@ export function Kpi({ id, value, sub, label }: { id: string; value: ReactNode; s
     <Card className="kpi">
       <div className="kpi-top">
         <div className="kpi-label">{label ?? c.title}</div>
-        <Tooltip title={statuses.map((s) => STATUS_META[s].label).join(' + ')}>
-          <span style={{ display: 'inline-flex', gap: 3 }}>
-            {statuses.map((s) => (
-              <Tag key={s} color={STATUS_META[s].color} style={{ margin: 0, paddingInline: 5 }}>
-                {STATUS_ICON[s]}
-              </Tag>
-            ))}
-          </span>
-        </Tooltip>
+        <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
+          <EvidenceRow c={c} compact />
+          <Tooltip title={statuses.map((s) => STATUS_META[s].label).join(' + ')}>
+            <span style={{ display: 'inline-flex', gap: 3 }}>
+              {statuses.map((s) => (
+                <Tag key={s} color={STATUS_META[s].color} style={{ margin: 0, paddingInline: 5 }}>
+                  {STATUS_ICON[s]}
+                </Tag>
+              ))}
+            </span>
+          </Tooltip>
+        </span>
       </div>
       {locked ? (
         <>

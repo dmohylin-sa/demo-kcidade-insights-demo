@@ -8,9 +8,9 @@ import { axisProps, yAxisProps, gridProps, intTooltip, makeTooltip, pctTick, Tru
 import { useScope, fmtInt, fmtPct, ratio } from '../lib/scope';
 import { resourceUse, monthOverlap } from '../lib/metrics';
 import { monthIndexOfDay, monthLabel } from '../lib/time';
-import { AREAS, RES_TYPES, DEVICES } from '../data/taxonomy';
+import { AREAS, RES_TYPES } from '../data/taxonomy';
 import { page } from '../data/registry';
-import { SERIES, INK, typeColor, rampColor, rampInk, ORDINAL } from '../lib/palette';
+import { SERIES, INK, typeColor, rampColor, rampInk, ORDINAL, STATUS_COLORS } from '../lib/palette';
 
 export default function Materials() {
   const s = useScope();
@@ -23,7 +23,6 @@ export default function Materials() {
     const byId = new Map(ru.map((r) => [r.resourceId, r]));
     const uses = ru.reduce((a, b) => a + b.uses, 0);
     const learnerSet = new Set<number>();
-    const deviceCount: Record<string, number> = {};
     let plays = 0;
     let finished = 0;
     const m0 = monthIndexOfDay(s.start);
@@ -43,7 +42,6 @@ export default function Materials() {
       const ti = RES_TYPES.indexOf(r.type);
       if (s.mode === 'proposed') {
         learnerSet.add(e.learnerId);
-        deviceCount[e.device] = (deviceCount[e.device] ?? 0) + 1;
         monthly[monthIndexOfDay(e.day) - m0][r.type] = (monthly[monthIndexOfDay(e.day) - m0][r.type] as number) + 1;
         grid[r.areaId][ti]++;
         if (e.kind === 'play') {
@@ -99,6 +97,42 @@ export default function Materials() {
     });
 
     const gridMax = Math.max(1, ...grid.flat());
+
+    // one-click feedback: "Was this useful for your work?"
+    const fb = d.resFeedback.filter((x) => s.resourceOk[x.resourceId] && s.learnerOk[x.learnerId] && s.inRange(x.day));
+    const fbByRes = new Map<number, number[]>();
+    for (const x of fb) {
+      const arr = fbByRes.get(x.resourceId) ?? [0, 0, 0];
+      arr[x.answer]++;
+      fbByRes.set(x.resourceId, arr);
+    }
+    const useful = RES_TYPES.map((t) => {
+      const rows = fb.filter((x) => d.resources[x.resourceId].type === t);
+      return {
+        type: t,
+        n: rows.length,
+        yes: ratio(rows.filter((x) => x.answer === 0).length, rows.length),
+        partly: ratio(rows.filter((x) => x.answer === 1).length, rows.length),
+        no: ratio(rows.filter((x) => x.answer === 2).length, rows.length),
+      };
+    }).filter((r) => r.n > 0);
+
+    // searches and filters in the resource library
+    const searchMonthly: { month: string; searches: number; withFilter: number; noResults: number; noShare: number }[] = [];
+    for (let mi = m0; mi <= m1; mi++) searchMonthly.push({ month: monthLabel(mi), searches: 0, withFilter: 0, noResults: 0, noShare: 0 });
+    const filterUse: Record<string, number> = { Format: 0, 'Learning area': 0, Language: 0 };
+    for (const x of d.searches) {
+      if (!s.learnerOk[x.learnerId] || !s.inRange(x.day)) continue;
+      const row = searchMonthly[monthIndexOfDay(x.day) - m0];
+      row.searches++;
+      if (x.filter) {
+        row.withFilter++;
+        filterUse[x.filter]++;
+      }
+      if (x.results === 0) row.noResults++;
+    }
+    searchMonthly.forEach((r) => (r.noShare = ratio(r.noResults, r.searches)));
+    const searchTotal = searchMonthly.reduce((a, b) => a + b.searches, 0);
     return {
       uses,
       learners: learnerSet.size,
@@ -111,7 +145,12 @@ export default function Materials() {
       gridMax,
       top,
       byId,
-      devices: DEVICES.map((dv, i) => ({ label: dv, value: deviceCount[dv] ?? 0, color: SERIES[i] })),
+      useful,
+      fbN: fb.length,
+      fbByRes,
+      searchMonthly,
+      searchTotal,
+      filterUse,
       videos,
       avgCurve,
     };
@@ -132,10 +171,10 @@ export default function Materials() {
   return (
     <>
       <PageHead title={p.title} intro={p.intro} />
-      <FilterBar segmentNote="In today's data, view counts are anonymous: learner filters (occupation, age and others) cannot be applied to them. Downloads by logged-in learners do follow the filters." />
+      <FilterBar segmentNote="In today's data, page views come from MonsterInsights, in aggregate: learner filters (role, age and others) cannot be applied to them. Downloads by logged-in learners do follow the filters." />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
-        <Kpi id="mt-uses" value={fmtInt(m.uses)} sub={s.mode === 'today' ? undefined : 'opens, views, plays and downloads by logged-in learners'} />
+        <Kpi id="mt-uses" value={fmtInt(m.uses)} sub={s.mode === 'today' ? 'page views by everyone + downloads' : 'opened, played or downloaded by registered learners'} />
         <Kpi id="mt-learners" value={fmtInt(m.learners)} sub="logged-in learners" />
         <Kpi id="mt-downloads" value={fmtInt(m.downloads)} sub={`${fmtInt(m.learnerDownloads)} by learners${s.segmentActive ? '' : `, ${fmtInt(m.visitorDownloads)} by visitors`}`} />
         <Kpi id="mt-videofinish" value={fmtPct(m.videoFinish)} sub="of video plays reach the end" />
@@ -199,6 +238,17 @@ export default function Materials() {
                   align: 'right',
                   render: (v: number) => (s.mode === 'today' ? lockCell : Number.isFinite(v) ? fmtPct(v) : '-'),
                 },
+                {
+                  title: 'Useful for work',
+                  dataIndex: 'resourceId',
+                  align: 'right',
+                  render: (id: number) => {
+                    if (s.mode === 'today') return <AntTooltip title="Needs the one-click feedback"><LockOutlined style={{ color: INK.muted }} /></AntTooltip>;
+                    const a = m.fbByRes.get(id);
+                    const n = a ? a[0] + a[1] + a[2] : 0;
+                    return n >= 3 ? `${fmtPct(ratio(a![0], n))} yes (${n})` : '-';
+                  },
+                },
               ]}
             />
           </ChartCard>
@@ -257,8 +307,41 @@ export default function Materials() {
               </ChartCard>
             </Col>
             <Col xs={24}>
-              <ChartCard id="mt-device">
-                <SegBar parts={m.devices} />
+              <ChartCard
+                id="mt-useful"
+                table={{
+                  columns: [
+                    { key: 'type', title: 'Format' },
+                    { key: 'n', title: 'Answers', align: 'right' },
+                    { key: 'yes', title: 'Yes', align: 'right', render: (v: number) => fmtPct(v) },
+                    { key: 'partly', title: 'Partly', align: 'right', render: (v: number) => fmtPct(v) },
+                    { key: 'no', title: 'No', align: 'right', render: (v: number) => fmtPct(v) },
+                  ],
+                  rows: m.useful,
+                }}
+                note={`${fmtInt(m.fbN)} one-click answers in the period. Asked after a resource is opened or downloaded.`}
+              >
+                <Legend
+                  items={[
+                    { label: 'Yes', color: SERIES[2] },
+                    { label: 'Partly', color: SERIES[3] },
+                    { label: 'No', color: INK.neutralBar },
+                  ]}
+                />
+                {m.useful.length ? (
+                  <ResponsiveContainer width="100%" height={Math.max(170, m.useful.length * 28)}>
+                    <BarChart data={m.useful} layout="vertical" margin={{ top: 0, right: 12, left: 0, bottom: 0 }}>
+                      <XAxis type="number" domain={[0, 1]} hide />
+                      <YAxis type="category" dataKey="type" {...yAxisProps} width={128} interval={0} tick={{ fill: INK.secondary, fontSize: 12 }} />
+                      <Tooltip content={makeTooltip((v) => fmtPct(v), 'type')} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                      <Bar dataKey="yes" name="Yes" stackId="u" fill={SERIES[2]} stroke="#fcfcfb" strokeWidth={1} maxBarSize={16} />
+                      <Bar dataKey="partly" name="Partly" stackId="u" fill={SERIES[3]} stroke="#fcfcfb" strokeWidth={1} maxBarSize={16} />
+                      <Bar dataKey="no" name="No" stackId="u" fill={INK.neutralBar} stroke="#fcfcfb" strokeWidth={1} maxBarSize={16} radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <NoData />
+                )}
               </ChartCard>
             </Col>
           </Row>
@@ -343,6 +426,41 @@ export default function Materials() {
             ) : (
               <NoData />
             )}
+          </ChartCard>
+        </Col>
+
+        <Col xs={24}>
+          <ChartCard
+            id="mt-search"
+            table={{
+              columns: [
+                { key: 'month', title: 'Month' },
+                { key: 'searches', title: 'Searches', align: 'right' },
+                { key: 'withFilter', title: 'With a filter', align: 'right' },
+                { key: 'noResults', title: 'No results', align: 'right' },
+              ],
+              rows: m.searchMonthly,
+            }}
+            note={`${fmtInt(m.searchTotal)} searches in the period. Filters used: format ${fmtInt(m.filterUse.Format)}, learning area ${fmtInt(m.filterUse['Learning area'])}, language ${fmtInt(m.filterUse.Language)}. What the searches with no results asked for is on the Content gaps screen.`}
+          >
+            <Legend
+              items={[
+                { label: 'Searches', color: SERIES[0] },
+                { label: 'With a filter', color: SERIES[1] },
+                { label: 'No results', color: STATUS_COLORS.critical },
+              ]}
+            />
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={m.searchMonthly} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={1}>
+                <CartesianGrid {...gridProps} />
+                <XAxis dataKey="month" {...axisProps} />
+                <YAxis {...yAxisProps} allowDecimals={false} />
+                <Tooltip content={intTooltip} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                <Bar dataKey="searches" name="Searches" fill={SERIES[0]} radius={[4, 4, 0, 0]} maxBarSize={16} />
+                <Bar dataKey="withFilter" name="With a filter" fill={SERIES[1]} radius={[4, 4, 0, 0]} maxBarSize={16} />
+                <Bar dataKey="noResults" name="No results" fill={STATUS_COLORS.critical} radius={[4, 4, 0, 0]} maxBarSize={16} />
+              </BarChart>
+            </ResponsiveContainer>
           </ChartCard>
         </Col>
       </Row>

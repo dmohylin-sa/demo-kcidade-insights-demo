@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Drawer, Checkbox, Button, Tag, Divider } from 'antd';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { chartsFor, page, STATUS_META, type PageKey, type Priced } from '../data/registry';
+import { chartsFor, page, STATUS_META, SOURCE_META, layersOf, type PageKey, type Priced } from '../data/registry';
+import { LayerChip } from './ui';
 import { useStore } from '../lib/store';
 import { INTERNAL } from '../data/internal';
 
@@ -104,6 +105,12 @@ export default function PresenterPanel({ pageKey }: { pageKey: PageKey }) {
                   </span>
                 </div>
                 <div className="note-chart-meta">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', margin: '2px 0' }}>
+                    {layersOf(c).map((l) => (
+                      <LayerChip key={l} layer={l} compact />
+                    ))}
+                    <span>{c.sources.map((k) => SOURCE_META[k].label).join(', ')}</span>
+                  </div>
                   <div>
                     <b>Source:</b> {c.source}
                   </div>

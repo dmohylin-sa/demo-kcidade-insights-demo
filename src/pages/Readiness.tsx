@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Row, Col, Card, Table, Segmented } from 'antd';
+import { Row, Col, Card, Table, Select } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { PageHead, SegBar, DataBadge } from '../components/ui';
-import { CHARTS, PAGES, STATUS_META, type Status, type ChartDef } from '../data/registry';
+import { PageHead, SegBar, DataBadge, LayerChip } from '../components/ui';
+import { CHARTS, PAGES, STATUS_META, layersOf, type Status, type ChartDef } from '../data/registry';
 import { INK } from '../lib/palette';
 
 const STATUS_FILL: Record<Status, string> = {
@@ -11,7 +11,30 @@ const STATUS_FILL: Record<Status, string> = {
   survey: '#6250d6',
   profile: '#eda100',
   cop: '#e87ba4',
+  ai: '#3b5bdb',
+  evidence: '#d9480f',
 };
+
+const WORK: { status: Status; text: string; starts: string }[] = [
+  {
+    status: 'track',
+    text: 'The platform event log: resources opened and downloaded, video and audio, searches, recommendations shown and clicked, tutor conversations with their mode and lesson, the registration gate.',
+    starts: 'Data starts at go-live.',
+  },
+  {
+    status: 'survey',
+    text: 'One-click resource feedback, the end-of-course survey, tutor thumbs, the six-monthly platform survey, and the follow-ups at 6 and 12 months for selected courses.',
+    starts: 'Data starts with the first survey.',
+  },
+  {
+    status: 'profile',
+    text: 'Level 1 fields: institution type and name, district and municipality, experience, education, how they found the platform, a starting point, and the consents.',
+    starts: 'Data starts when learners fill them in.',
+  },
+  { status: 'ai', text: 'AI grouping of tutor questions and the content gaps it flags. Scoring, summaries and patterns come in a second phase.', starts: 'Only for learners who agree to AI analysis.' },
+  { status: 'cop', text: 'A connection to the Communities of Practice app: members, posts, replies, moderation and co-created resources, linked to the learner.', starts: 'Depends on the app\'s API; second phase.' },
+  { status: 'evidence', text: 'A simple admin form for Layer 5: focus groups, interviews, manager questionnaires and trainer reports, with themes and quotes.', starts: 'Filled in by the AKF teams.' },
+];
 
 /** what a chart needs beyond today's data: the first badge that is not "today", or today */
 function need(c: ChartDef): Status {
@@ -25,7 +48,7 @@ export default function Readiness() {
   const charts = CHARTS.filter((c) => c.page !== 'readiness');
 
   const counts = useMemo(() => {
-    const out: Record<Status, number> = { today: 0, track: 0, survey: 0, profile: 0, cop: 0 };
+    const out: Record<Status, number> = { today: 0, track: 0, survey: 0, profile: 0, cop: 0, ai: 0, evidence: 0 };
     for (const c of charts) out[need(c)]++;
     return out;
   }, [charts]);
@@ -40,10 +63,11 @@ export default function Readiness() {
       question: c.question,
       need: need(c),
       today: c.todayMode,
+      chart: c,
       unlock: c.todayMode === 'locked' ? c.unlock ?? STATUS_META[need(c)].unlockedBy : c.todayMode === 'partial' ? c.todayNote : 'Works on existing data',
     }));
 
-  const order: Status[] = ['today', 'track', 'survey', 'profile', 'cop'];
+  const order: Status[] = ['today', 'track', 'survey', 'profile', 'ai', 'cop', 'evidence'];
 
   return (
     <>
@@ -65,53 +89,34 @@ export default function Readiness() {
                 label: st === 'today' ? 'Existing data' : `Needs: ${STATUS_META[st].label}`,
                 value: counts[st],
                 color: STATUS_FILL[st],
-                ink: st === 'profile' ? INK.primary : '#fff',
+                ink: st === 'profile' || st === 'cop' ? INK.primary : '#fff',
               }))}
             />
           </Card>
         </Col>
 
-        <Col xs={24} md={12} xl={6}>
-          <Card style={{ height: '100%' }}>
-            <DataBadge status="track" />
-            <p style={{ marginTop: 10, fontSize: 13.5, color: INK.secondary }}>
-              Records what learners do that the platform does not keep today: who opens a document, plays a video or a podcast, how far they watch, what the "Recommended for you" carousels show and what is clicked.
-            </p>
-            <b>Unlocks {counts.track} {counts.track === 1 ? 'chart' : 'charts'}.</b> Data starts at go-live.
-          </Card>
-        </Col>
-        <Col xs={24} md={12} xl={6}>
-          <Card style={{ height: '100%' }}>
-            <DataBadge status="survey" />
-            <p style={{ marginTop: 10, fontSize: 13.5, color: INK.secondary }}>
-              A course survey at completion and follow-ups at 6 and 12 months, sent with a reference to the learner and the course, with reminders.
-            </p>
-            <b>Unlocks {counts.survey} {counts.survey === 1 ? 'chart' : 'charts'}.</b> Data starts with the first survey.
-          </Card>
-        </Col>
-        <Col xs={24} md={12} xl={6}>
-          <Card style={{ height: '100%' }}>
-            <DataBadge status="profile" />
-            <p style={{ marginTop: 10, fontSize: 13.5, color: INK.secondary }}>An organisation field on registration and the profile, chosen from a managed list, so results can be grouped by organisation.</p>
-            <b>Unlocks {counts.profile} {counts.profile === 1 ? 'chart' : 'charts'}.</b> Data starts when learners fill it in.
-          </Card>
-        </Col>
-        <Col xs={24} md={12} xl={6}>
-          <Card style={{ height: '100%' }}>
-            <DataBadge status="cop" />
-            <p style={{ marginTop: 10, fontSize: 13.5, color: INK.secondary }}>A connection to the Communities of Practice app: members, posts, replies and moderation, linked to the learner's account.</p>
-            <b>Unlocks {counts.cop} {counts.cop === 1 ? 'chart' : 'charts'}.</b> Depends on the app's API and launch.
-          </Card>
-        </Col>
+        {WORK.map((w) => (
+          <Col xs={24} md={12} xl={8} key={w.status}>
+            <Card style={{ height: '100%' }}>
+              <DataBadge status={w.status} />
+              <p style={{ marginTop: 10, fontSize: 13.5, color: INK.secondary }}>{w.text}</p>
+              <b>
+                Unlocks {counts[w.status]} {counts[w.status] === 1 ? 'chart' : 'charts'}.
+              </b>{' '}
+              {w.starts}
+            </Card>
+          </Col>
+        ))}
 
         <Col xs={24}>
           <Card
             title="Every chart and what it needs"
             extra={
-              <Segmented
+              <Select
+                style={{ width: 210 }}
                 value={filter}
                 onChange={(v) => setFilter(v as 'all' | Status)}
-                options={[{ value: 'all', label: 'All' }, ...order.map((st) => ({ value: st, label: st === 'today' ? 'Existing data' : STATUS_META[st].label }))]}
+                options={[{ value: 'all', label: 'All charts' }, ...order.map((st) => ({ value: st, label: st === 'today' ? 'Existing data' : `Needs: ${STATUS_META[st].label}` }))]}
               />
             }
           >
@@ -139,6 +144,17 @@ export default function Readiness() {
                       <div style={{ fontWeight: 600 }}>{t}</div>
                       <div style={{ fontSize: 12, color: INK.secondary }}>{r.question}</div>
                     </div>
+                  ),
+                },
+                {
+                  title: 'Layers',
+                  dataIndex: 'chart',
+                  render: (c: ChartDef) => (
+                    <span style={{ display: 'inline-flex', gap: 3 }}>
+                      {layersOf(c).map((l) => (
+                        <LayerChip key={l} layer={l} compact />
+                      ))}
+                    </span>
                   ),
                 },
                 { title: 'Today', dataIndex: 'today', render: (v: string) => (v === 'full' ? 'Complete' : v === 'partial' ? 'Partial' : 'Not recorded') },

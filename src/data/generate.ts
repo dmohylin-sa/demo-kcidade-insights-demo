@@ -16,9 +16,20 @@ import {
   GENDERS,
   NOT_ANSWERED,
   ORGANISATIONS,
+  INSTITUTIONS,
+  INST_TYPES,
+  TERRITORIES,
+  EXPERIENCE,
+  EDUCATION,
+  FOUND_VIA,
   DEVICES,
   CAROUSELS,
   COMMUNITIES,
+  QUESTION_GROUPS,
+  UNMATCHED_TOPICS,
+  L5_METHODS,
+  L5_INDICATORS,
+  TOPICS as TOPIC_LIST,
   type ContentLang,
   type ResType,
   type QType,
@@ -97,6 +108,20 @@ export interface Learner {
   prefLang: ContentLang;
   interests: number[];
   org: string;
+  /** Level 1 proposed fields */
+  instType: string;
+  district: string;
+  municipality: string;
+  experience: string;
+  education: string;
+  foundVia: string;
+  /** starting-point confidence 1-5, or 0 when not answered */
+  baseline: number;
+  consentEval: boolean;
+  consentRecontact: boolean;
+  consentAI: boolean;
+  /** registered right after the registration gate was shown */
+  viaGate: boolean;
   device: string;
   motivation: number;
   ability: number;
@@ -149,7 +174,10 @@ export interface ResourceEvent {
 export interface AnonMonth {
   resourceId: number;
   month: number;
+  /** MonsterInsights page views, everyone who accepts analytics cookies */
   views: number;
+  /** the part of those views by visitors without an account */
+  visitorViews: number;
   visitorDownloads: number;
 }
 
@@ -177,8 +205,11 @@ export interface SurveyResponse {
   reminded: boolean;
   answered: boolean;
   answerDay: number;
+  /** Quality, Fits my work, Increased my understanding (1-5) */
   scores: number[];
-  relevance: number;
+  /** "What will you try to apply in your work?" */
+  plan: string | null;
+  /** "What is missing, or what would you change?" */
   comment: string | null;
 }
 
@@ -189,15 +220,114 @@ export interface CourseReview {
   stars: number;
 }
 
+/** Level 4 follow-up, one row per eligible learner, course and wave (0 = +6 months, 1 = +12 months) */
 export interface FollowUp {
   learnerId: number;
   courseId: number;
-  wave: 0 | 1 | 2;
+  enrolmentId: number;
+  wave: 0 | 1;
   sentDay: number;
+  consented: boolean;
+  contacted: boolean;
   answered: boolean;
-  agree: boolean[];
-  /** the probability behind each answer; the demo charts average these to stay stable with few answers */
-  agreeP: number[];
+  /** index into USE_LEVELS: often, sometimes, not yet, no */
+  use: number;
+  outcomes: Partial<Record<'tried' | 'shared' | 'still' | 'orgChange' | 'community', boolean>>;
+  confBefore: number;
+  confNow: number;
+  barriers: number[];
+  copContacts: boolean | null;
+  volunteer: boolean;
+  changeText: string | null;
+}
+
+export interface TutorConv {
+  learnerId: number;
+  day: number;
+  mode: 'Text' | 'Voice';
+  minutes: number;
+  /** index into QUESTION_GROUPS; -1 when the learner did not consent to AI analysis */
+  group: number;
+  lessonId: number | null;
+  /** index into UNMATCHED_TOPICS when no resource matched, else -1 */
+  unmatched: number;
+  /** 1 thumbs up, -1 thumbs down, 0 no rating */
+  thumbs: number;
+}
+
+export interface PlatformSurvey {
+  learnerId: number;
+  wave: number;
+  month: number;
+  answered: boolean;
+  items: Partial<Record<string, number>>;
+  nps: number;
+  /** index into MODE_PREFS */
+  modePref: number;
+}
+
+export interface ResFeedback {
+  learnerId: number;
+  resourceId: number;
+  day: number;
+  /** 0 yes, 1 partly, 2 no */
+  answer: number;
+}
+
+export interface SearchEvent {
+  learnerId: number;
+  day: number;
+  term: string;
+  results: number;
+  /** filter used with the search, or null */
+  filter: 'Format' | 'Learning area' | 'Language' | null;
+  unmatched: number;
+}
+
+export interface GateMonth {
+  month: number;
+  shown: number;
+}
+
+export interface TrafficMonth {
+  month: number;
+  channels: Record<string, number>;
+  devices: Record<string, number>;
+  regions: Record<string, number>;
+  referrers: Record<string, number>;
+  newUsers: number;
+  returningUsers: number;
+  engagedRate: number;
+}
+
+export interface L5Activity {
+  id: number;
+  day: number;
+  method: string;
+  areaId: number;
+  municipality: string;
+  participants: number;
+  roles: string[];
+  instTypes: string[];
+  themes: string[];
+  quote: string;
+  /** observed level per L5 indicator, 1-4, or 0 when not covered */
+  ratings: number[];
+  /** does the activity describe practice change in line with the learners' reports? */
+  observedChange: number;
+}
+
+export interface CopCoCreated {
+  communityId: number;
+  month: number;
+  started: number;
+  completed: number;
+}
+
+export interface BadgeEarned {
+  learnerId: number;
+  badge: string;
+  day: number;
 }
 
 export interface CopMemberMonth {
@@ -243,6 +373,17 @@ export interface Dataset {
   copMemberMonths: CopMemberMonth[];
   copCommunityMonths: CopCommunityMonth[];
   copSurveys: CopSurvey[];
+  copCoCreated: CopCoCreated[];
+  tutorConvs: TutorConv[];
+  platformSurveys: PlatformSurvey[];
+  resFeedback: ResFeedback[];
+  searches: SearchEvent[];
+  gateMonths: GateMonth[];
+  traffic: TrafficMonth[];
+  l5: L5Activity[];
+  badges: BadgeEarned[];
+  /** courses the D&I team selected for the +6 and +12 month follow-ups */
+  followUpCourses: number[][];
   /** learning-activity days per learner: today = LearnDash + downloads; proposed adds tracked views and plays */
   activityToday: number[][];
   activityProposed: number[][];
@@ -250,6 +391,12 @@ export interface Dataset {
 
 export const COP_LAUNCH_MONTH = 8; // Jan 2026
 export const AI_MODERATION_MONTH = 11; // Apr 2026
+export const TUTOR_LAUNCH_MONTH = 7; // Dec 2025
+export const GATE_MONTH = 12; // May 2026
+export const PLATFORM_SURVEY_MONTHS = [7, 13]; // Dec 2025, Jun 2026
+export const FOLLOWUP_6M = [0, 1, 2, 3, 4, 5, 7, 8, 10, 11];
+export const FOLLOWUP_12M = [0, 2, 4, 7, 10, 11];
+export const BADGES = ['First course completed', 'Three courses completed', 'Quiz ace', 'Curious mind', 'Persistent learner', 'Fast finisher'] as const;
 
 // ---------------------------------------------------------------- catalogue specs
 
@@ -278,7 +425,7 @@ const COURSE_SPECS: CourseSpec[] = [
       'Analisar e priorizar',
       'Devolver resultados à comunidade',
     ],
-    aspects: [4.3, 4.4, 4.2, 4.1],
+    aspects: [4.2, 4.4, 4.2],
   },
   {
     title: 'Building Local Partnerships',
@@ -287,7 +434,7 @@ const COURSE_SPECS: CourseSpec[] = [
     topics: [2, 1],
     popularity: 0.75,
     lessons: ['Why partnerships matter', 'Mapping potential partners', 'Agreements and roles', 'Keeping partnerships alive'],
-    aspects: [4.0, 3.9, 4.1, 3.8],
+    aspects: [4.1, 3.9, 3.9],
   },
   {
     title: 'Parentalidade Positiva',
@@ -303,7 +450,7 @@ const COURSE_SPECS: CourseSpec[] = [
       'Comunicar com afeto',
       'Apoiar famílias em contexto comunitário',
     ],
-    aspects: [4.5, 4.6, 4.4, 4.5],
+    aspects: [4.4, 4.6, 4.5],
   },
   {
     title: 'Early Learning at Home',
@@ -312,7 +459,7 @@ const COURSE_SPECS: CourseSpec[] = [
     topics: [4, 3],
     popularity: 0.85,
     lessons: ['How young children learn', 'Play as learning', 'Early literacy', 'Working with parents', 'Simple materials at home'],
-    aspects: [4.2, 4.0, 4.3, 4.2],
+    aspects: [4.3, 4.0, 4.2],
   },
   {
     title: 'Proteção de Crianças e Jovens',
@@ -329,7 +476,7 @@ const COURSE_SPECS: CourseSpec[] = [
       'Prevenção na comunidade',
     ],
     dips: { 3: 0.7 },
-    aspects: [3.4, 4.3, 4.0, 3.9],
+    aspects: [3.4, 4.3, 4.0],
   },
   {
     title: 'Youth Participation in Practice',
@@ -338,7 +485,7 @@ const COURSE_SPECS: CourseSpec[] = [
     topics: [7],
     popularity: 0.9,
     lessons: ['What participation means', 'Levels of participation', 'Youth-led projects', 'Facilitation skills', 'Measuring participation'],
-    aspects: [4.1, 4.2, 4.0, 4.0],
+    aspects: [4.0, 4.2, 4.1],
   },
   {
     title: 'Educação Não Formal',
@@ -347,7 +494,7 @@ const COURSE_SPECS: CourseSpec[] = [
     topics: [8, 6],
     popularity: 0.8,
     lessons: ['Princípios da educação não formal', 'Desenhar uma sessão', 'Métodos ativos', 'Avaliar aprendizagens'],
-    aspects: [4.2, 4.1, 4.2, 4.3],
+    aspects: [4.2, 4.1, 4.2],
   },
   {
     title: 'Competências para a Empregabilidade',
@@ -362,7 +509,7 @@ const COURSE_SPECS: CourseSpec[] = [
       'A entrevista',
       'Acompanhar candidatos',
     ],
-    aspects: [4.0, 4.1, 3.9, 4.2],
+    aspects: [3.9, 4.1, 4.1],
   },
   {
     title: 'Social Entrepreneurship Basics',
@@ -379,7 +526,7 @@ const COURSE_SPECS: CourseSpec[] = [
       'Pitching your project',
     ],
     dips: { 1: 0.72 },
-    aspects: [3.9, 4.0, 3.8, 3.7],
+    aspects: [3.8, 4.0, 3.8],
   },
   {
     title: 'Envelhecimento Ativo e Comunidade',
@@ -388,7 +535,7 @@ const COURSE_SPECS: CourseSpec[] = [
     topics: [12, 14],
     popularity: 0.8,
     lessons: ['Envelhecer hoje', 'Participação e autonomia', 'Projetos intergeracionais', 'Redes de apoio'],
-    aspects: [4.3, 4.2, 4.3, 4.1],
+    aspects: [4.3, 4.2, 4.2],
   },
   {
     title: 'Project Management for NGOs',
@@ -397,7 +544,7 @@ const COURSE_SPECS: CourseSpec[] = [
     topics: [15],
     popularity: 1.0,
     lessons: ['Project basics', 'Planning the work', 'Budgets', 'Schedules and the critical path', 'Managing risk', 'Closing a project'],
-    aspects: [4.1, 3.8, 4.0, 3.3],
+    aspects: [4.0, 3.3, 4.0],
   },
   {
     title: 'Monitorização e Avaliação de Projetos',
@@ -414,7 +561,16 @@ const COURSE_SPECS: CourseSpec[] = [
       'Usar os resultados',
     ],
     dips: { 2: 0.66 },
-    aspects: [3.5, 4.4, 3.9, 4.0],
+    aspects: [3.9, 4.4, 3.6],
+  },
+  {
+    title: 'Mediação Intercultural na Prática',
+    lang: 'Portuguese',
+    area: 6,
+    topics: [18, 19],
+    popularity: 0.85,
+    lessons: ['Cultura, identidade e preconceito', 'O papel do mediador', 'Comunicar com intérpretes', 'Mediar conflitos na comunidade'],
+    aspects: [4.2, 4.3, 4.1],
   },
 ];
 
@@ -594,10 +750,12 @@ const TOPIC_PT: string[] = [
   'Gestão de projetos',
   'Monitorização e avaliação',
   'Angariação de fundos e governação',
+  'Mediação intercultural',
+  'Integração de migrantes',
 ];
 
 /** designed supply per topic: number of resources tagged with it */
-const TOPIC_SUPPLY = [10, 8, 6, 11, 8, 7, 5, 7, 6, 9, 6, 4, 7, 2, 4, 8, 3, 3];
+const TOPIC_SUPPLY = [10, 8, 6, 11, 8, 7, 5, 7, 6, 9, 6, 4, 7, 2, 4, 8, 3, 3, 4, 3];
 
 const RES_TYPE_WEIGHTS = [34, 20, 12, 9, 15, 10];
 
@@ -621,27 +779,64 @@ const RES_TITLE_PT: Record<ResType, string[]> = {
 
 const COMMENTS: Record<string, string[]> = {
   positive: [
-    'Very practical, I used the templates the following week.',
-    'Clear structure and good examples from real projects.',
+    'Nothing missing, the examples from real projects were enough.',
     'Gostei muito dos exemplos práticos.',
     'The videos were short and easy to follow.',
-    'Muito útil para o meu trabalho com famílias.',
     'Good balance between theory and practice.',
   ],
-  Structure: [
+  Quality: [
     'Lesson 4 felt out of order, I needed it earlier.',
-    'Some lessons are much longer than others.',
+    'Some videos have poor sound.',
     'A ordem das lições não é clara.',
+    'O PDF tem erros de formatação.',
   ],
-  Relevance: ['Interesting, but not close to my daily work.', 'Mais exemplos do contexto português, por favor.'],
-  Quality: ['Some videos have poor sound.', 'O PDF tem erros de formatação.'],
-  'Practical usefulness': [
-    'I would like more tools I can use straight away.',
-    'Too much theory, not enough practice.',
-    'Faltam exercícios práticos.',
-  ],
+  'Fits my work': ['Interesting, but not close to my daily work.', 'Mais exemplos do contexto português, por favor.', 'Too much theory, not enough practice.'],
+  'Increased my understanding': ['I knew most of this already.', 'Faltam exercícios práticos.', 'More depth on the methods, please.'],
 };
 
+/** "What will you try to apply in your work?" per learning area */
+const PLANS: string[][] = [
+  ['Run a short participatory mapping session with the families I follow.', 'Ask residents to rank the priorities before our next plan.'],
+  ['Try the planned-ignoring approach with parents in my next home visit.', 'Use the routines checklist with two families.'],
+  ['Use the session plan template with my youth group.', 'Let the young people choose the next project theme.'],
+  ['Use the interview checklist with my candidates.', 'Test one income idea with the group before investing.'],
+  ['Start a weekly check-in with the older people in our centre.', 'Pair a school class with our day centre.'],
+  ['Set up three indicators for our food bank project.', 'Draw a theory of change with my team.'],
+  ['Book an interpreter for the next family meeting.', 'Use the mediation steps in the next neighbour conflict.'],
+];
+
+/** "Describe one thing you now do differently in your work" per learning area */
+const CHANGES: string[][] = [
+  ['I now open every project with a short listening round in the neighbourhood.', 'We map local resources with residents before planning.'],
+  ['My home visits now follow a clear routine with the parents.', 'I explain limits without punishment, and parents copy it.'],
+  ['Young people now run part of our weekly session.', 'I plan sessions with active methods instead of talks.'],
+  ['I prepare candidates for interviews with a checklist.', 'We tested a small catering idea with the group.'],
+  ['We added an intergenerational activity every month.', 'Older people now help plan the centre activities.'],
+  ['Our reports now show results, not only activities.', 'We review two indicators at every team meeting.'],
+  ['We always ask families which language they prefer.', 'I mediate before conflicts reach the school.'],
+];
+
+/** Layer 5 themes and quotes per learning area (invented) */
+const L5_THEMES: string[][] = [
+  ['Residents more involved in planning', 'Better use of local partners', 'Time pressure limits change'],
+  ['Families more involved in decisions', 'More structured home visits', 'Peer support between colleagues'],
+  ['Young people take part in decisions', 'New group sessions started', 'Managers not yet aware of the training'],
+  ['Managers not yet aware of the training', 'Tools not adapted to local context', 'Time pressure limits change'],
+  ['Older people more involved in planning', 'New intergenerational activities', 'Peer support between colleagues'],
+  ['Clearer indicators in project reports', 'Better use of local partners', 'Peer support between colleagues'],
+  ['Families helped in their own language', 'Tools adapted to local context', 'Time pressure limits change'],
+];
+const L5_QUOTES: string[] = [
+  'Since the course, the team asks residents first. It takes longer, but people come back. (coordinator, OSC)',
+  'The home visits are more organised; parents know what to expect. (manager, municipal service)',
+  'Two of our youth workers now let the group choose the activity. (coordinator, youth association)',
+  'I did not notice a difference in how candidates are prepared. Nobody told me about the course. (manager, employment service)',
+  'The day centre now plans activities with the older people, not for them. (director, IPSS)',
+  'Project reports finally show results. Funders noticed. (director, foundation)',
+  'Families now get an interpreter when they need one; that was rare before. (head teacher)',
+];
+
+// ---------------------------------------------------------------- generation
 // ---------------------------------------------------------------- generation
 
 export function generate(): Dataset {
@@ -796,7 +991,7 @@ export function generate(): Dataset {
   // --- learners
   const N = 500;
   const learners: Learner[] = [];
-  const occW = [16, 15, 13, 14, 8, 7, 9, 6, 4];
+  const occW = [18, 15, 14, 12, 8, 9, 10, 6];
   const waW = [24, 20, 10, 12, 18, 6, 6];
   const langs: ContentLang[] = ['Portuguese', 'English', 'Nepali', 'Bengali', 'Urdu', 'Mandarin'];
   const langW = [56, 28, 6, 4, 4, 2];
@@ -819,10 +1014,10 @@ export function generate(): Dataset {
     }
     let motivation = Math.pow(rng.next(), 0.75);
     if (occupation === 'Student') motivation *= 0.85;
-    if (occupation === 'Community facilitator' || occupation === 'Social worker') motivation = Math.min(1, motivation * 1.1);
+    if (occupation === 'Community development technician' || occupation === 'Social worker') motivation = Math.min(1, motivation * 1.1);
     const ability = rng.normal(0, 1) + (occupation === 'Student' ? -0.25 : 0);
     const org = rng.chance(0.3) ? NOT_ANSWERED : rng.weighted(ORGANISATIONS, orgW);
-    const device = rng.weighted(DEVICES, prefLang === 'Portuguese' || prefLang === 'English' ? [50, 44, 6] : [28, 68, 4]);
+    const device = rng.weighted(DEVICES, prefLang === 'Portuguese' || prefLang === 'English' ? [49, 43, 6, 2] : [28, 67, 4, 1]);
     learners.push({
       id: i,
       code: `L-${10000 + Math.floor(rng.next() * 89999)}`,
@@ -834,6 +1029,17 @@ export function generate(): Dataset {
       prefLang,
       interests,
       org,
+      instType: 'None',
+      district: '',
+      municipality: '',
+      experience: NOT_ANSWERED,
+      education: NOT_ANSWERED,
+      foundVia: NOT_ANSWERED,
+      baseline: 0,
+      consentEval: true,
+      consentRecontact: false,
+      consentAI: false,
+      viaGate: false,
       device,
       motivation,
       ability,
@@ -1012,7 +1218,7 @@ export function generate(): Dataset {
       const learnerViews = learnerViewsByResMonth.get(`${r.id}:${m}`) ?? 0;
       const visitorDownloads =
         r.type === 'Document' || r.type === 'Download package' ? rng.poisson(r.appeal * 1.3 * growth * partial) : 0;
-      anon.push({ resourceId: r.id, month: m, views: visitors + Math.round(learnerViews * 0.85), visitorDownloads });
+      anon.push({ resourceId: r.id, month: m, views: visitors + Math.round(learnerViews * 0.85), visitorViews: visitors, visitorDownloads });
     }
   }
 
@@ -1031,23 +1237,21 @@ export function generate(): Dataset {
         const clicks = posDecay.map((d) => rng.poisson(visits * carouselBase[c] * d * (0.7 + 0.8 * l.motivation)));
         recStats.push({ learnerId: l.id, carousel: c, month: m, shown: visits, clicks });
       }
-      activityProposed[l.id].push(clamp(monthStartDay(m) + rng.int(0, 27), l.regDay, TODAY));
+      rng.int(0, 27); // keeps the random sequence; a home-page visit is not a learning action
     }
   }
 
   // --- course survey at completion (new), Course Reviews (today, if switched on)
   const surveys: SurveyResponse[] = [];
   const reviews: CourseReview[] = [];
-  const followUps: FollowUp[] = [];
   const occupationBoost: Record<string, number> = {
     'Social worker': 0.06,
-    'Teacher / educator': 0.03,
-    'Community facilitator': 0.08,
-    'NGO staff': 0.05,
-    'Health professional': 0.0,
-    'Public administration': -0.03,
+    Teacher: 0.03,
+    'Community development technician': 0.08,
+    'Public-service staff': -0.02,
+    Trainer: 0.05,
+    'OSC leader': 0.07,
     Student: -0.12,
-    Volunteer: -0.02,
     Other: -0.02,
     [NOT_ANSWERED]: 0,
   };
@@ -1063,9 +1267,6 @@ export function generate(): Dataset {
     'Fundação Comunidade Viva': 0.04,
     [NOT_ANSWERED]: 0,
   };
-  const p0 = [0.46, 0.38, 0.3, 0.2];
-  const d6 = [0.17, 0.15, 0.11, 0.07];
-  const d12 = [0.2, 0.2, 0.16, 0.12];
 
   for (const e of enrolments) {
     if (e.completedDay === null) continue;
@@ -1077,13 +1278,13 @@ export function generate(): Dataset {
     const scores = c.aspectBase.map((base) =>
       Math.round(clamp(rng.normal(base + (e.matched ? 0.08 : -0.08), 0.5), 1, 5)),
     );
-    const relevance = Math.round(clamp(rng.normal(e.matched ? 4.25 : 3.35, 0.8), 1, 5));
     let comment: string | null = null;
     if (answered && rng.chance(0.32)) {
       const minIdx = scores.indexOf(Math.min(...scores));
-      const aspects = ['Structure', 'Relevance', 'Quality', 'Practical usefulness'];
+      const aspects = ['Quality', 'Fits my work', 'Increased my understanding'];
       comment = scores[minIdx] <= 3 ? rng.pick(COMMENTS[aspects[minIdx]]) : rng.pick(COMMENTS.positive);
     }
+    const plan = answered && rng.chance(0.58 + 0.2 * l.motivation) ? rng.pick(PLANS[c.areaId]) : null;
     const answerDay = answeredFirst ? e.completedDay + rng.int(0, 3) : e.completedDay + rng.int(5, 9);
     surveys.push({
       enrolmentId: e.id,
@@ -1094,35 +1295,17 @@ export function generate(): Dataset {
       answered: answered && answerDay <= TODAY,
       answerDay: Math.min(answerDay, TODAY),
       scores,
-      relevance,
+      plan,
       comment,
     });
     if (rng.chance(0.2)) {
-      const mean = c.aspectBase.reduce((a, b) => a + b, 0) / 4;
+      const mean = c.aspectBase.reduce((a, b) => a + b, 0) / c.aspectBase.length;
       reviews.push({
         learnerId: l.id,
         courseId: c.id,
         day: Math.min(TODAY, e.completedDay + rng.int(0, 4)),
         stars: Math.round(clamp(rng.normal(mean + 0.1, 0.7), 1, 5)),
       });
-    }
-    // follow-ups: wave 0 asked in the completion survey, then 6 and 12 months
-    const boost = (occupationBoost[l.occupation] ?? 0) + (orgBoost[l.org] ?? 0) * 0.8 + (l.motivation - 0.5) * 0.15;
-    const waveProb = (w: number) =>
-      p0.map((p, k) => clamp(p + boost + (w >= 1 ? d6[k] : 0) + (w === 2 ? d12[k] - d6[k] : 0), 0.03, 0.97));
-    if (answered) {
-      const pr = waveProb(0);
-      followUps.push({ learnerId: l.id, courseId: c.id, wave: 0, sentDay: e.completedDay, answered: true, agree: pr.map((p) => rng.chance(p)), agreeP: pr });
-    }
-    if (e.completedDay + 182 <= TODAY) {
-      const pr = waveProb(1);
-      const ans = rng.chance(0.4 + 0.15 * l.motivation);
-      followUps.push({ learnerId: l.id, courseId: c.id, wave: 1, sentDay: e.completedDay + 182, answered: ans, agree: pr.map((p) => rng.chance(p)), agreeP: pr });
-    }
-    if (e.completedDay + 365 <= TODAY) {
-      const pr = waveProb(2);
-      const ans = rng.chance(0.3 + 0.15 * l.motivation);
-      followUps.push({ learnerId: l.id, courseId: c.id, wave: 2, sentDay: e.completedDay + 365, answered: ans, agree: pr.map((p) => rng.chance(p)), agreeP: pr });
     }
   }
 
@@ -1179,6 +1362,390 @@ export function generate(): Dataset {
     }
   }
 
+  // ================================================================ proposal additions
+  // A second random stream, so the additions do not shift the data above.
+  const r2 = new Rng(20261118);
+
+  // --- Level 1 fields proposed in the framework
+  const instTypeByRole: Record<string, number[]> = {
+    // OSC, Municipality, School, Public service, University, Other, None
+    'Social worker': [45, 25, 0, 20, 0, 10, 0],
+    Teacher: [10, 0, 80, 0, 5, 5, 0],
+    'Community development technician': [55, 30, 0, 0, 0, 15, 0],
+    'Public-service staff': [0, 30, 0, 65, 0, 5, 0],
+    Trainer: [40, 0, 0, 0, 20, 25, 15],
+    'OSC leader': [100, 0, 0, 0, 0, 0, 0],
+    Student: [0, 0, 0, 0, 75, 0, 25],
+  };
+  const instMunicipality: Record<string, string> = {
+    'Associação Raízes': 'Amadora',
+    'Centro Comunitário Horizonte': 'Sintra',
+    'Rede Social Local Norte': 'Loures',
+    'IPSS Bem-Estar': 'Lisboa',
+    'Cooperativa Social Ponte': 'Almada',
+    'Escola Básica do Vale': 'Odivelas',
+    'Associação Juvenil Elo': 'Amadora',
+    'Junta de Freguesia Sul': 'Seixal',
+    'Fundação Comunidade Viva': 'Porto',
+  };
+  const gateStart = monthStartDay(GATE_MONTH);
+  for (const l of learners) {
+    const inst = INSTITUTIONS.find((x) => x.name === l.org);
+    l.instType = inst ? inst.type : r2.weighted(INST_TYPES, instTypeByRole[l.occupation] ?? [20, 5, 10, 10, 0, 30, 25]);
+    const terr =
+      inst && r2.chance(0.85)
+        ? TERRITORIES.find((t) => t.municipality === instMunicipality[inst.name])!
+        : r2.weighted(TERRITORIES, TERRITORIES.map((t) => t.w));
+    l.district = terr.district;
+    l.municipality = terr.municipality;
+    l.experience = r2.chance(0.38)
+      ? NOT_ANSWERED
+      : r2.weighted(EXPERIENCE, l.ageGroup === '15-30' ? [55, 38, 7, 0] : l.ageGroup === '65+' ? [3, 7, 15, 75] : [12, 28, 27, 33]);
+    l.education = r2.chance(0.45) ? NOT_ANSWERED : r2.weighted(EDUCATION, l.occupation === 'Student' ? [40, 55, 5] : [18, 52, 30]);
+    l.foundVia = r2.chance(0.25)
+      ? NOT_ANSWERED
+      : r2.weighted(FOUND_VIA, l.occupation === 'Student' ? [8, 52, 15, 15, 8, 2] : l.org !== NOT_ANSWERED ? [48, 4, 22, 12, 8, 6] : [18, 6, 26, 22, 20, 8]);
+    l.baseline = r2.chance(0.55) ? Math.round(clamp(r2.normal(2.7 + 0.25 * l.ability, 0.8), 1, 5)) : 0;
+    l.consentEval = r2.chance(0.91);
+    l.consentRecontact = r2.chance(0.56 + 0.25 * l.motivation);
+    l.consentAI = r2.chance(0.72);
+    l.viaGate = l.regDay >= gateStart && r2.chance(0.38);
+  }
+
+  // --- Virtual Tutor (Kappa): conversations linked to the learner ID
+  const tutorConvs: TutorConv[] = [];
+  const tutorStart = monthStartDay(TUTOR_LAUNCH_MONTH);
+  const groupW = [24, 20, 14, 16, 9, 9, 8];
+  const groupUp = [0.86, 0.82, 0.74, 0.84, 0.72, 0.8, 0.55];
+  const learnerMode: number[] = learners.map(() => 0);
+  const tutorUser: boolean[] = learners.map(() => false);
+  for (const l of learners) {
+    const from = Math.max(l.regDay, tutorStart);
+    const to = Math.min(TODAY, l.activeUntil + 30);
+    learnerMode[l.id] = clamp((l.device === 'Mobile' ? 0.32 : 0.12) + r2.normal(0, 0.08), 0.02, 0.8);
+    if (to <= from) continue;
+    if (!r2.chance(0.14 + 0.42 * l.motivation + (l.device === 'Mobile' ? 0.05 : 0))) continue;
+    tutorUser[l.id] = true;
+    const myLessons = enrolments.filter((e) => e.learnerId === l.id && e.started).flatMap((e) => courses[e.courseId].lessonIds.slice(0, Math.max(1, e.lessonsDone + 1)));
+    const n = 1 + r2.poisson(1.2 + 4.5 * l.motivation);
+    for (let k = 0; k < n; k++) {
+      const day = Math.floor(from + (to - from) * Math.pow(r2.next(), 0.8));
+      const mode = r2.chance(learnerMode[l.id]) ? 'Voice' : 'Text';
+      const group = r2.weighted(QUESTION_GROUPS.map((_, i) => i), groupW);
+      const noMatch = r2.chance(group === 2 ? 0.32 : group === 4 ? 0.22 : 0.07);
+      const unmatched = noMatch ? r2.weighted(UNMATCHED_TOPICS.map((_, i) => i), [12, 10, 16, 9, 7, 6, 8]) : -1;
+      const fromLesson = myLessons.length > 0 && r2.chance(0.55);
+      let lessonId: number | null = null;
+      if (fromLesson) {
+        // learners ask more where lessons are hard: weight by the lesson's fall-off
+        lessonId = r2.weighted(myLessons, myLessons.map((lid) => 1 + 6 * (1 - lessons[lid].continueProb)));
+      }
+      const rated = r2.chance(0.3);
+      const thumbs = rated ? (r2.chance(groupUp[group] - (noMatch ? 0.25 : 0)) ? 1 : -1) : 0;
+      tutorConvs.push({
+        learnerId: l.id,
+        day,
+        mode,
+        minutes: Math.round(clamp(r2.exp(mode === 'Voice' ? 4.2 : 6.5) + 1, 1, 40) * 10) / 10,
+        group: l.consentAI ? group : -1,
+        lessonId,
+        unmatched,
+        thumbs,
+      });
+      activityProposed[l.id].push(day);
+    }
+  }
+  tutorConvs.sort((a, b) => a.day - b.day);
+
+  // --- one-click resource feedback: "Was this useful for your work?"
+  const resFeedback: ResFeedback[] = [];
+  for (const e of resEvents) {
+    if (!r2.chance(0.22)) continue;
+    const r = resources[e.resourceId];
+    const l = learners[e.learnerId];
+    const matched = l.interests.includes(r.topicId);
+    const typeAdj = [0.05, 0.02, -0.04, -0.12, 0.08, 0.06][RES_TYPES.indexOf(r.type)];
+    const pYes = clamp(0.42 + 0.12 * Math.log(r.appeal + 0.5) + typeAdj + (matched ? 0.08 : -0.05), 0.1, 0.9);
+    const u = r2.next();
+    const answer = u < pYes ? 0 : u < pYes + (1 - pYes) * 0.62 ? 1 : 2;
+    resFeedback.push({ learnerId: e.learnerId, resourceId: e.resourceId, day: e.day, answer });
+  }
+
+  // --- resource library searches (registered learners, event log)
+  const searches: SearchEvent[] = [];
+  const termPool = TOPIC_LIST.map((t, i) => ({ term: TOPIC_PT[i], topicId: t.id }));
+  for (const l of learners) {
+    const n = r2.poisson(0.4 + 5 * l.motivation);
+    const lastDay = Math.min(TODAY, Math.max(l.regDay + 3, l.activeUntil));
+    for (let k = 0; k < n; k++) {
+      const day = Math.floor(l.regDay + (lastDay - l.regDay) * r2.next());
+      const filter = r2.weighted<SearchEvent['filter']>(['Format', 'Learning area', 'Language', null], [18, 22, 9, 51]);
+      if (r2.chance(0.15)) {
+        const u = r2.weighted(UNMATCHED_TOPICS.map((_, i) => i), [10, 12, 15, 8, 9, 6, 9]);
+        searches.push({ learnerId: l.id, day, term: UNMATCHED_TOPICS[u], results: 0, filter, unmatched: u });
+      } else {
+        const own = r2.chance(0.6) && l.interests.length ? l.interests[r2.int(0, l.interests.length - 1)] : r2.int(0, TOPIC_LIST.length - 1);
+        const supply = resources.filter((r) => r.topicId === own).length;
+        searches.push({ learnerId: l.id, day, term: termPool[own].term, results: supply, filter, unmatched: -1 });
+      }
+    }
+  }
+  searches.sort((a, b) => a.day - b.day);
+
+  // --- registration gate (proposed: an account after 3 resources), from May 2026 in the demo
+  const gateMonths: GateMonth[] = [];
+  for (let m = GATE_MONTH; m < MONTH_COUNT; m++) {
+    const regs = learners.filter((l) => l.viaGate && monthIndexOfDay(l.regDay) === m).length;
+    const partial = m === MONTH_COUNT - 1 ? 17 / 30 : 1;
+    gateMonths.push({ month: m, shown: Math.max(regs + 5, Math.round((regs / 0.11) * (0.85 + 0.3 * r2.next()) + r2.poisson(20 * partial))) });
+  }
+
+  // --- MonsterInsights (Google Analytics): all visitors who accept analytics cookies, in aggregate
+  const traffic: TrafficMonth[] = [];
+  const chW: Record<string, number> = { 'Organic search': 34, Direct: 24, Referral: 18, Social: 11, Email: 8, 'AI tools': 5 };
+  const refW: Record<string, number> = {
+    'Moodle (universities)': 30,
+    'Microsoft Teams': 22,
+    'Partner OSC websites': 18,
+    'chatgpt.com': 10,
+    'facebook.com': 9,
+    'linkedin.com': 7,
+    'perplexity.ai': 3,
+    'gemini.google.com': 2,
+  };
+  for (let m = 0; m < MONTH_COUNT; m++) {
+    const growth = 0.4 + (0.6 * m) / (MONTH_COUNT - 1);
+    const partial = m === MONTH_COUNT - 1 ? 17 / 30 : 1;
+    const sessions = Math.round((1400 + r2.normal(0, 90)) * growth * partial);
+    const channels: Record<string, number> = {};
+    for (const [k, w] of Object.entries(chW)) {
+      const aiGrowth = k === 'AI tools' ? 0.3 + (1.7 * m) / (MONTH_COUNT - 1) : 1;
+      channels[k] = Math.round((sessions * w * aiGrowth * (0.9 + 0.2 * r2.next())) / 100);
+    }
+    const total = Object.values(channels).reduce((a, b) => a + b, 0);
+    const devices = {
+      Laptop: Math.round(total * (0.5 - 0.004 * m)),
+      Mobile: Math.round(total * (0.43 + 0.004 * m)),
+      Tablet: Math.round(total * 0.05),
+      'VR headset': Math.round(total * (m >= 9 ? 0.02 : 0.006)),
+    };
+    const regions = {
+      Lisboa: Math.round(total * 0.52),
+      Setúbal: Math.round(total * 0.12),
+      Porto: Math.round(total * 0.11),
+      'Rest of Portugal': Math.round(total * 0.13),
+      Brazil: Math.round(total * 0.07),
+      'Other countries': Math.round(total * 0.05),
+    };
+    const referrers: Record<string, number> = {};
+    for (const [k, w] of Object.entries(refW)) {
+      const ai = k.endsWith('.ai') || k.startsWith('chatgpt') || k.startsWith('gemini') ? 0.3 + (1.7 * m) / (MONTH_COUNT - 1) : 1;
+      referrers[k] = Math.round((channels.Referral + channels['AI tools']) * (w / 100) * ai * (0.85 + 0.3 * r2.next()));
+    }
+    const newShare = clamp(0.62 - 0.012 * m, 0.4, 0.7);
+    traffic.push({
+      month: m,
+      channels,
+      devices,
+      regions,
+      referrers,
+      newUsers: Math.round(total * 0.78 * newShare),
+      returningUsers: Math.round(total * 0.78 * (1 - newShare)),
+      engagedRate: clamp(0.52 + 0.006 * m + r2.normal(0, 0.015), 0.4, 0.7),
+    });
+  }
+
+  // --- Communities of Practice: resources co-created by two or more members
+  const copCoCreated: CopCoCreated[] = [];
+  for (const c of COMMUNITIES) {
+    for (let m = COP_LAUNCH_MONTH + 1; m < MONTH_COUNT; m++) {
+      const partial = m === MONTH_COUNT - 1 ? 0.55 : 1;
+      copCoCreated.push({
+        communityId: c.id,
+        month: m,
+        started: Math.round(r2.poisson(1.1 * communityVibe[c.id]) * partial),
+        completed: Math.round(r2.poisson(0.6 * communityVibe[c.id] * Math.min(1, (m - COP_LAUNCH_MONTH) / 3)) * partial),
+      });
+    }
+  }
+
+  // --- six-monthly platform survey, to learners active in the six months before
+  const platformSurveys: PlatformSurvey[] = [];
+  const itemBase: Record<string, number> = {
+    variety: 3.7,
+    quality: 4.1,
+    access: 3.55,
+    paths: 3.55,
+    tutorUseful: 4.0,
+    tutorRelevant: 3.7,
+    tutorReflect: 3.35,
+    lessAlone: 3.45,
+    discussions: 3.9,
+  };
+  PLATFORM_SURVEY_MONTHS.forEach((m, wave) => {
+    const day = monthStartDay(m) + 10;
+    for (const l of learners) {
+      const act = activityProposed[l.id].some((x) => x <= day && x > day - 182);
+      if (!act || !l.consentEval) continue;
+      const answered = r2.chance(0.24 + 0.3 * l.motivation);
+      const es = enrolments.filter((e) => e.learnerId === l.id);
+      const matchedShare = es.length ? es.filter((e) => e.matched).length / es.length : 0.5;
+      const usedTutor = tutorUser[l.id] && tutorConvs.some((t) => t.learnerId === l.id && t.day <= day);
+      const member = l.communities.length > 0 && l.copJoinMonth <= m;
+      const lift = wave * 0.12;
+      const sc = (base: number, sd = 0.85) => Math.round(clamp(r2.normal(base + lift + (l.motivation - 0.5) * 0.5, sd), 1, 5));
+      const items: Record<string, number> = {
+        variety: sc(itemBase.variety),
+        quality: sc(itemBase.quality, 0.7),
+        access: sc(itemBase.access - (l.device === 'Mobile' ? 0.35 : 0)),
+        paths: sc(itemBase.paths + (matchedShare - 0.5) * 1.1),
+        lessAlone: sc(itemBase.lessAlone + (member ? 0.55 : 0)),
+      };
+      if (usedTutor) {
+        items.tutorUseful = sc(itemBase.tutorUseful, 0.75);
+        items.tutorRelevant = sc(itemBase.tutorRelevant);
+        items.tutorReflect = sc(itemBase.tutorReflect + (wave ? 0.15 : 0));
+      }
+      if (member && m > COP_LAUNCH_MONTH) items.discussions = sc(itemBase.discussions);
+      const nps = Math.round(clamp(r2.normal(7.6 + (l.motivation - 0.5) * 2.4 + lift, 1.8), 0, 10));
+      // stated preference: more learners say they prefer voice than actually use it
+      const modePref = usedTutor ? r2.weighted([0, 1, 2], [48 - 30 * learnerMode[l.id], 26 + 50 * learnerMode[l.id], 26]) : r2.weighted([0, 1, 2, 3], [8, 6, 4, 82]);
+      platformSurveys.push({ learnerId: l.id, wave, month: m, answered, items, nps, modePref });
+    }
+  });
+
+  // --- Level 4 follow-ups at +6 and +12 months, for the courses the D&I team selects
+  const followUps: FollowUp[] = [];
+  const courseApply: Record<number, number> = { 0: 0.04, 2: 0.08, 4: 0.02, 7: 0.14, 8: 0.1, 10: -0.04, 11: 0.03 };
+  for (const e of enrolments) {
+    if (e.completedDay === null) continue;
+    const l = learners[e.learnerId];
+    const c = courses[e.courseId];
+    [FOLLOWUP_6M, FOLLOWUP_12M].forEach((sel, wave) => {
+      if (!sel.includes(c.id)) return;
+      const sentDay = (e.completedDay as number) + (wave === 0 ? 182 : 365);
+      if (sentDay > TODAY) return;
+      const consented = l.consentRecontact;
+      const contacted = consented && !r2.chance(0.04);
+      const answered = contacted && r2.chance((wave === 0 ? 0.36 : 0.28) + 0.4 * l.motivation);
+      const boost = (occupationBoost[l.occupation] ?? 0) + (orgBoost[l.org] ?? 0) * 0.8 + (l.motivation - 0.5) * 0.25 + (courseApply[c.id] ?? 0);
+      const pUse = clamp(0.62 + boost + (wave === 1 ? -0.04 : 0), 0.15, 0.95);
+      const u = r2.next();
+      const use = u < pUse * 0.42 ? 0 : u < pUse ? 1 : u < pUse + (1 - pUse) * 0.6 ? 2 : 3;
+      const applying = use <= 1;
+      const before = l.baseline > 0 ? Math.max(1, l.baseline + (r2.chance(0.3) ? 1 : 0) - (r2.chance(0.2) ? 1 : 0)) : Math.round(clamp(r2.normal(2.6, 0.8), 1, 5));
+      const gain = applying ? (wave === 0 ? 1.1 : 1.3) : 0.4;
+      const now = Math.round(clamp(before + gain + r2.normal(0, 0.6), 1, 5));
+      const outcomes: FollowUp['outcomes'] = {};
+      if (wave === 0) {
+        outcomes.tried = r2.chance(clamp(0.5 + boost + (applying ? 0.15 : -0.2), 0.05, 0.95));
+        outcomes.shared = r2.chance(clamp(0.38 + boost + (applying ? 0.1 : -0.15), 0.05, 0.95));
+      } else {
+        outcomes.shared = r2.chance(clamp(0.48 + boost + (applying ? 0.1 : -0.15), 0.05, 0.95));
+        outcomes.still = applying && r2.chance(0.82);
+        outcomes.orgChange = r2.chance(clamp(0.06 + boost * 0.8 + (applying ? 0.08 : -0.1) + (l.instType === 'OSC' ? 0.06 : 0), 0.03, 0.9));
+        outcomes.community = r2.chance(clamp(0.2 + boost + (applying ? 0.1 : -0.15), 0.03, 0.9));
+      }
+      const barriers: number[] = [];
+      if (wave === 0) {
+        if (r2.chance(applying ? 0.38 : 0.62)) barriers.push(0);
+        if (r2.chance(0.22)) barriers.push(1);
+        if (r2.chance(c.areaId === 3 ? 0.42 : 0.18)) barriers.push(2);
+        if (r2.chance(c.id === 10 ? 0.45 : 0.14)) barriers.push(3);
+        if (r2.chance(0.05)) barriers.push(4);
+      }
+      const member = l.communities.length > 0;
+      followUps.push({
+        learnerId: l.id,
+        courseId: c.id,
+        enrolmentId: e.id,
+        wave: wave as 0 | 1,
+        sentDay,
+        consented,
+        contacted,
+        answered,
+        use,
+        outcomes,
+        confBefore: before,
+        confNow: Math.max(before, now),
+        barriers,
+        copContacts: member ? r2.chance(0.34 + 0.2 * l.motivation) : null,
+        volunteer: answered && r2.chance(0.24),
+        changeText: answered && applying && r2.chance(0.6) ? r2.pick(CHANGES[c.areaId]) : null,
+      });
+    });
+  }
+
+  // --- Layer 5: evidence gathered by the AKF teams, recorded in an admin form
+  const l5: L5Activity[] = [];
+  // the designed picture: what observers see per learning area (1-4)
+  const observed = [3.0, 3.4, 2.9, 2.1, 3.0, 3.2, 2.7];
+  const plan: [string, number, number][] = [
+    // method, count, months back spread
+    ['Focus group', 7, 12],
+    ['Semi-structured interview', 11, 10],
+    ['Manager questionnaire', 6, 12],
+    ['Trainer report', 8, 12],
+    ['Case study', 3, 12],
+    ['Feedback from people served', 3, 9],
+  ];
+  const roleNames = ['Social worker', 'Teacher', 'Community development technician', 'Public-service staff', 'Trainer', 'OSC leader'];
+  let l5id = 0;
+  for (const [method, count, back] of plan) {
+    for (let k = 0; k < count; k++) {
+      const areaId = method === 'Focus group' ? k % 7 : r2.weighted([0, 1, 2, 3, 4, 5, 6], [14, 18, 12, 16, 12, 16, 4]);
+      if (areaId === 6 && method !== 'Focus group' && r2.chance(0.7)) continue;
+      const day = TODAY - r2.int(5, back * 30);
+      const base = observed[areaId];
+      const ratings = L5_INDICATORS.map((_, i) => {
+        if (r2.chance(method === 'Case study' || method === 'Focus group' ? 0.1 : 0.4)) return 0;
+        const adj = i === 4 ? -0.3 : i === 6 ? 0.1 : i === 5 ? -0.15 : 0;
+        return Math.round(clamp(r2.normal(base + adj, 0.55), 1, 4));
+      });
+      const terr = r2.weighted(TERRITORIES, TERRITORIES.map((t) => t.w));
+      const participants = method === 'Focus group' ? r2.int(6, 10) : method === 'Manager questionnaire' ? r2.int(8, 25) : method === 'Trainer report' ? r2.int(10, 30) : method === 'Feedback from people served' ? r2.int(12, 40) : 1;
+      const nRoles = method === 'Semi-structured interview' || method === 'Case study' ? 1 : r2.int(2, 4);
+      const roles = Array.from(new Set(Array.from({ length: nRoles }, () => r2.pick(roleNames))));
+      const insts = Array.from(new Set(Array.from({ length: Math.max(1, nRoles - 1) }, () => r2.pick(['OSC', 'Municipality', 'School', 'Public service']))));
+      l5.push({
+        id: l5id++,
+        day,
+        method,
+        areaId,
+        municipality: terr.municipality,
+        participants,
+        roles,
+        instTypes: insts,
+        themes: L5_THEMES[areaId].filter(() => r2.chance(0.6)).slice(0, 2).concat(r2.chance(0.3) ? [r2.pick(L5_THEMES[areaId])] : []).filter((x, i, a) => a.indexOf(x) === i),
+        quote: L5_QUOTES[areaId],
+        ratings,
+        observedChange: base,
+      });
+    }
+  }
+  l5.sort((a, b) => b.day - a.day);
+  l5.forEach((x) => {
+    if (!x.themes.length) x.themes = [L5_THEMES[x.areaId][0]];
+  });
+
+  // --- GamiPress badges, derived from what learners did
+  const badges: BadgeEarned[] = [];
+  for (const l of learners) {
+    const done = enrolments
+      .filter((e) => e.learnerId === l.id && e.completedDay !== null)
+      .sort((a, b) => (a.completedDay as number) - (b.completedDay as number));
+    if (done[0]) badges.push({ learnerId: l.id, badge: BADGES[0], day: done[0].completedDay as number });
+    if (done[2]) badges.push({ learnerId: l.id, badge: BADGES[1], day: done[2].completedDay as number });
+    const fast = done.find((e) => (e.completedDay as number) - e.day <= 14);
+    if (fast) badges.push({ learnerId: l.id, badge: BADGES[5], day: fast.completedDay as number });
+    const firstPasses = attempts.filter((a) => a.learnerId === l.id && a.attemptNo === 1 && a.passed).sort((a, b) => a.day - b.day);
+    if (firstPasses[4]) badges.push({ learnerId: l.id, badge: BADGES[2], day: firstPasses[4].day });
+    const late = attempts.find((a) => a.learnerId === l.id && a.attemptNo >= 3 && a.passed);
+    if (late) badges.push({ learnerId: l.id, badge: BADGES[4], day: late.day });
+    const dls = resEvents.filter((e) => e.learnerId === l.id && e.kind === 'download');
+    if (dls[4]) badges.push({ learnerId: l.id, badge: BADGES[3], day: dls[4].day });
+  }
+
   // --- finalise activity days
   for (let i = 0; i < learners.length; i++) {
     const t = Array.from(new Set(activityToday[i])).sort((a, b) => a - b);
@@ -1205,6 +1772,16 @@ export function generate(): Dataset {
     copMemberMonths,
     copCommunityMonths,
     copSurveys,
+    copCoCreated,
+    tutorConvs,
+    platformSurveys,
+    resFeedback,
+    searches,
+    gateMonths,
+    traffic,
+    l5,
+    badges,
+    followUpCourses: [FOLLOWUP_6M, FOLLOWUP_12M],
     activityToday,
     activityProposed,
   };

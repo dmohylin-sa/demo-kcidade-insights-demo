@@ -7,3 +7,8 @@ src/data/internal-notes.ts
 # single-file build for local use
 dist-single
 .env*
+# internal list of sources (client docs, estimate files): never pushed
+SOURCES.md
+SOURCES.html
+# macOS folder metadata
+.DS_Store

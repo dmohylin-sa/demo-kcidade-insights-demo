@@ -1,12 +1,14 @@
 import { useMemo } from 'react';
-import { Row, Col } from 'antd';
+import { Row, Col, Tag } from 'antd';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LabelList, LineChart, Line, Cell } from 'recharts';
 import FilterBar from '../components/FilterBar';
 import { ChartCard, Kpi, PageHead, Legend, NoData } from '../components/ui';
 import { axisProps, yAxisProps, gridProps, intTooltip, makeTooltip, BAR_RADIUS, HBAR_RADIUS } from '../components/viz';
 import { useScope, fmtInt, fmtPct, ratio, mean, median } from '../lib/scope';
+import { formatDay } from '../lib/time';
+import { FOLLOWUP_WAVES } from '../data/taxonomy';
 import { monthIndexOfDay, monthLabel, MONTH_COUNT } from '../lib/time';
-import { COMMUNITIES } from '../data/taxonomy';
+import { COMMUNITIES, AREAS } from '../data/taxonomy';
 import { COP_LAUNCH_MONTH, AI_MODERATION_MONTH } from '../data/generate';
 import { page } from '../data/registry';
 import { SERIES, INK } from '../lib/palette';
@@ -63,7 +65,42 @@ export default function Communities() {
       { group: 'Other learners', rate: done(es.filter((e) => !memberIds.has(e.learnerId))), n: es.filter((e) => !memberIds.has(e.learnerId)).length },
     ];
 
+    // co-created resources (two or more members), started and completed
+    const co = d.copCoCreated.filter((x) => cids.has(x.communityId) && inMonths(x.month));
+    const cocreated = [];
+    for (let mi = m0; mi <= m1 && mi < MONTH_COUNT; mi++) {
+      const rows = co.filter((x) => x.month === mi);
+      cocreated.push({ month: monthLabel(mi), Started: rows.reduce((a, b) => a + b.started, 0), Completed: rows.reduce((a, b) => a + b.completed, 0) });
+    }
+
+    // platform survey: members vs other learners
+    const ps = d.platformSurveys.filter((x) => x.answered && s.learnerOk[x.learnerId] && x.month > COP_LAUNCH_MONTH);
+    const isMember = (id: number) => d.learners[id].communities.some((c) => cids.has(c));
+    const avgItem = (rows: typeof ps, k: string) => mean(rows.map((x) => x.items[k]).filter((v): v is number => v !== undefined));
+    const psM = ps.filter((x) => isMember(x.learnerId));
+    const psO = ps.filter((x) => !isMember(x.learnerId));
+    const usefulness = [
+      { item: 'The platform makes me feel less alone in my practice', members: avgItem(psM, 'lessAlone'), others: avgItem(psO, 'lessAlone') as number | null, nM: psM.length, nO: psO.length },
+      { item: 'The community discussions are useful for my work', members: avgItem(psM, 'discussions'), others: null as number | null, nM: psM.filter((x) => x.items.discussions !== undefined).length, nO: 0 },
+    ];
+
+    // follow-up: new contacts or collaborations, members only
+    const fuC = d.followUps.filter((f) => f.answered && f.copContacts !== null && s.learnerOk[f.learnerId] && isMember(f.learnerId));
+    const contacts = FOLLOWUP_WAVES.map((w, i) => {
+      const rows = fuC.filter((f) => f.wave === i);
+      return { wave: w, share: ratio(rows.filter((f) => f.copContacts).length, rows.length), n: rows.length };
+    });
+
+    // Layer 5: focus groups and interviews about peer support
+    const focus = d.l5.filter((x) => x.themes.includes('Peer support between colleagues') && (s.filters.area === null || x.areaId === s.filters.area)).slice(0, 4);
+
     return {
+      cocreated,
+      coStarted: co.reduce((a, b) => a + b.started, 0),
+      coCompleted: co.reduce((a, b) => a + b.completed, 0),
+      usefulness,
+      contacts,
+      focus,
       members: members.length,
       active: active.size,
       posts,
@@ -186,6 +223,56 @@ export default function Communities() {
 
         <Col xs={24} lg={14}>
           <ChartCard
+            id="cp-cocreated"
+            table={{ columns: [{ key: 'month', title: 'Month' }, { key: 'Started', title: 'Started', align: 'right' }, { key: 'Completed', title: 'Completed', align: 'right' }], rows: m.cocreated }}
+            note={`${fmtInt(m.coStarted)} resources started and ${fmtInt(m.coCompleted)} completed by two or more members. Counting those started needs a draft status in the app.`}
+          >
+            <Legend
+              items={[
+                { label: 'Started', color: SERIES[3] },
+                { label: 'Completed', color: SERIES[2] },
+              ]}
+            />
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={m.cocreated} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={2}>
+                <CartesianGrid {...gridProps} />
+                <XAxis dataKey="month" {...axisProps} />
+                <YAxis {...yAxisProps} allowDecimals={false} />
+                <Tooltip content={intTooltip} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                <Bar dataKey="Started" fill={SERIES[3]} radius={BAR_RADIUS} maxBarSize={18} />
+                <Bar dataKey="Completed" fill={SERIES[2]} radius={BAR_RADIUS} maxBarSize={18} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </Col>
+        <Col xs={24} lg={10}>
+          <ChartCard
+            id="cp-contacts"
+            table={{
+              columns: [
+                { key: 'wave', title: 'Follow-up' },
+                { key: 'n', title: 'Member answers', align: 'right' },
+                { key: 'share', title: 'New contacts or collaborations', align: 'right', render: (v: number) => fmtPct(v) },
+              ],
+              rows: m.contacts,
+            }}
+            note='"Has taking part in a Community of Practice led to new contacts or collaborations?" Asked to members in the follow-ups.'
+          >
+            <ResponsiveContainer width="100%" height={150}>
+              <BarChart data={m.contacts} layout="vertical" margin={{ top: 0, right: 64, left: 0, bottom: 0 }}>
+                <XAxis type="number" hide domain={[0, 1]} />
+                <YAxis type="category" dataKey="wave" {...yAxisProps} width={90} interval={0} tick={{ fill: INK.secondary, fontSize: 12 }} />
+                <Tooltip content={makeTooltip((v) => fmtPct(v), 'wave')} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                <Bar dataKey="share" name="Yes" fill={SERIES[4]} radius={HBAR_RADIUS} maxBarSize={24}>
+                  <LabelList dataKey="share" position="right" formatter={(v: number) => fmtPct(v)} style={{ fill: INK.primary, fontSize: 13, fontWeight: 700 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </Col>
+
+        <Col xs={24} lg={14}>
+          <ChartCard
             id="cp-belonging"
             table={{
               columns: [
@@ -196,25 +283,24 @@ export default function Communities() {
               ],
               rows: m.perCommunity,
             }}
-            note="Member survey, average score from 1 to 5."
+            note="Platform survey, average from 1 to 5. Members against learners who are not in a community."
           >
             <Legend
               items={[
-                { label: 'I feel I belong to this community', color: SERIES[0] },
-                { label: 'I get support from other members', color: SERIES[1] },
+                { label: 'Community members', color: SERIES[0] },
+                { label: 'Other learners', color: INK.neutralBar },
               ]}
             />
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={m.perCommunity} margin={{ top: 20, right: 8, left: 0, bottom: 0 }} barGap={2}>
-                <CartesianGrid {...gridProps} />
-                <XAxis dataKey="name" {...axisProps} interval={0} tick={{ fill: INK.muted, fontSize: 10.5 }} tickFormatter={(v: string) => (v.length > 18 ? `${v.slice(0, 17)}…` : v)} />
-                <YAxis {...yAxisProps} domain={[0, 5]} ticks={[0, 1, 2, 3, 4, 5]} />
-                <Tooltip content={makeTooltip((v) => v.toFixed(1))} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
-                <Bar dataKey="belonging" name="Belonging" fill={SERIES[0]} radius={BAR_RADIUS} maxBarSize={22}>
-                  <LabelList dataKey="belonging" position="top" formatter={(v: number) => (Number.isFinite(v) ? v.toFixed(1) : '')} style={{ fill: INK.secondary, fontSize: 10.5 }} />
+            <ResponsiveContainer width="100%" height={170}>
+              <BarChart data={m.usefulness} layout="vertical" margin={{ top: 0, right: 44, left: 0, bottom: 0 }} barGap={2}>
+                <XAxis type="number" domain={[0, 5]} hide />
+                <YAxis type="category" dataKey="item" {...yAxisProps} width={250} interval={0} tick={{ fill: INK.secondary, fontSize: 12 }} />
+                <Tooltip content={makeTooltip((v) => (Number.isFinite(v) ? v.toFixed(1) : '-'), 'item')} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                <Bar dataKey="members" name="Community members" fill={SERIES[0]} radius={HBAR_RADIUS} maxBarSize={16}>
+                  <LabelList dataKey="members" position="right" formatter={(v: number) => (Number.isFinite(v) ? v.toFixed(1) : '')} style={{ fill: INK.secondary, fontSize: 11, fontWeight: 600 }} />
                 </Bar>
-                <Bar dataKey="peerSupport" name="Peer support" fill={SERIES[1]} radius={BAR_RADIUS} maxBarSize={22}>
-                  <LabelList dataKey="peerSupport" position="top" formatter={(v: number) => (Number.isFinite(v) ? v.toFixed(1) : '')} style={{ fill: INK.secondary, fontSize: 10.5 }} />
+                <Bar dataKey="others" name="Other learners" fill={INK.neutralBar} radius={HBAR_RADIUS} maxBarSize={16}>
+                  <LabelList dataKey="others" position="right" formatter={(v: number | null) => (v !== null && Number.isFinite(v) ? v.toFixed(1) : '')} style={{ fill: INK.secondary, fontSize: 11, fontWeight: 600 }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -239,6 +325,32 @@ export default function Communities() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+          </ChartCard>
+        </Col>
+
+        <Col xs={24}>
+          <ChartCard id="cp-focus" note="Recorded by the area teams with the Layer 5 form; see the Triangulation screen for all evidence.">
+            {m.focus.length ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0 24px' }}>
+                {m.focus.map((x) => (
+                  <div className="comment" key={x.id}>
+                    <div className="comment-text">"{x.quote}"</div>
+                    <div className="comment-meta">
+                      {x.method} · {AREAS[x.areaId].name} · {x.municipality} · {formatDay(x.day)}
+                    </div>
+                    <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {x.themes.map((t) => (
+                        <Tag key={t} style={{ margin: 0 }}>
+                          {t}
+                        </Tag>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <NoData text="No team evidence about peer support yet." />
+            )}
           </ChartCard>
         </Col>
       </Row>

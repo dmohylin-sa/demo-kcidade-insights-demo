@@ -5,10 +5,10 @@ import { useNavigate } from 'react-router-dom';
 import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, LabelList, ZAxis, BarChart, Bar } from 'recharts';
 import FilterBar from '../components/FilterBar';
 import { ChartCard, PageHead, Legend, DataBadge } from '../components/ui';
-import { axisProps, yAxisProps, makeTooltip, pctTick, HBAR_RADIUS } from '../components/viz';
-import { useScope, fmtPct, median } from '../lib/scope';
+import { axisProps, yAxisProps, makeTooltip, pctTick, HBAR_RADIUS, intTooltip } from '../components/viz';
+import { useScope, fmtPct, fmtInt, median, ratio } from '../lib/scope';
 import { topicGaps, langGaps, courseStats, quizStats } from '../lib/metrics';
-import { TOPICS, RES_TYPES } from '../data/taxonomy';
+import { TOPICS, RES_TYPES, UNMATCHED_TOPICS } from '../data/taxonomy';
 import { page, type Status } from '../data/registry';
 import { SERIES, INK, rampColor, rampInk, STATUS_COLORS } from '../lib/palette';
 
@@ -126,7 +126,27 @@ export default function Gaps() {
           }),
         );
     }
-    return { pts, medDemand, medSupply, lg, format, formatMax, items };
+    // searches with no results, and tutor questions with no matching resource
+    const srch = d.searches.filter((x) => s.learnerOk[x.learnerId] && s.inRange(x.day));
+    const noRes = UNMATCHED_TOPICS.map((t, i) => ({ name: t, value: srch.filter((x) => x.unmatched === i).length })).sort((a, b) => b.value - a.value);
+    const tutor = d.tutorConvs.filter((t) => s.learnerOk[t.learnerId] && s.inRange(t.day));
+    const grouped = tutor.filter((t) => t.group >= 0);
+    const tutorGaps = UNMATCHED_TOPICS.map((t, i) => ({ name: t, value: grouped.filter((x) => x.unmatched === i).length })).sort((a, b) => b.value - a.value);
+    return {
+      pts,
+      medDemand,
+      medSupply,
+      lg,
+      format,
+      formatMax,
+      items,
+      noRes,
+      noResShare: ratio(srch.filter((x) => x.results === 0).length, srch.length),
+      searches: srch.length,
+      tutorGaps,
+      tutorN: tutor.length,
+      groupedShare: ratio(grouped.length, tutor.length),
+    };
   }, [s, d]);
 
   const maxX = Math.ceil((Math.max(0.2, ...m.pts.map((x) => x.x)) * 1.08) / 0.05) * 0.05;
@@ -217,6 +237,43 @@ export default function Gaps() {
                 <Tooltip content={makeTooltip((v) => fmtPct(v), 'lang')} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
                 <Bar dataKey="learnerShare" name="Learners" fill={SERIES[0]} radius={HBAR_RADIUS} maxBarSize={14} />
                 <Bar dataKey="contentShare" name="Content" fill={SERIES[1]} radius={HBAR_RADIUS} maxBarSize={14} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </Col>
+
+        <Col xs={24} lg={12}>
+          <ChartCard
+            id="gp-nosearch"
+            table={{ columns: [{ key: 'name', title: 'Searched for' }, { key: 'value', title: 'Searches', align: 'right' }], rows: m.noRes }}
+            note={`${fmtPct(m.noResShare)} of ${fmtInt(m.searches)} library searches in the period found nothing. Terms are grouped into topics.`}
+          >
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={m.noRes} layout="vertical" margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" {...yAxisProps} width={230} interval={0} tick={{ fill: INK.secondary, fontSize: 12 }} />
+                <Tooltip content={intTooltip} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                <Bar dataKey="value" name="Searches with no results" fill={STATUS_COLORS.critical} radius={HBAR_RADIUS} maxBarSize={18}>
+                  <LabelList dataKey="value" position="right" style={{ fill: INK.secondary, fontSize: 11, fontWeight: 600 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </Col>
+        <Col xs={24} lg={12}>
+          <ChartCard
+            id="gp-tutorgaps"
+            table={{ columns: [{ key: 'name', title: 'Topic asked' }, { key: 'value', title: 'Conversations', align: 'right' }], rows: m.tutorGaps }}
+            note={`Only conversations of learners who agreed to AI analysis are grouped: ${fmtPct(m.groupedShare)} of ${fmtInt(m.tutorN)} in the period.`}
+          >
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={m.tutorGaps} layout="vertical" margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" {...yAxisProps} width={230} interval={0} tick={{ fill: INK.secondary, fontSize: 12 }} />
+                <Tooltip content={intTooltip} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                <Bar dataKey="value" name="Tutor questions with no resource" fill={SERIES[6]} radius={HBAR_RADIUS} maxBarSize={18}>
+                  <LabelList dataKey="value" position="right" style={{ fill: INK.secondary, fontSize: 11, fontWeight: 600 }} />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>

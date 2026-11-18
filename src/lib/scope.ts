@@ -2,7 +2,8 @@
 
 import { useMemo } from 'react';
 import { DATA, type Dataset } from '../data/generate';
-import { useStore, type Filters, type Mode, LEARNER_FILTER_KEYS } from './store';
+import { useStore, type Filters, type Mode, LEARNER_FILTER_KEYS, PROPOSED_FILTER_KEYS } from './store';
+import { MIN_GROUP } from '../data/audiences';
 import { periodStart, TODAY } from './time';
 
 export interface Scope {
@@ -16,6 +17,8 @@ export interface Scope {
   resourceOk: boolean[];
   /** a learner filter is set: anonymous counts cannot follow it */
   segmentActive: boolean;
+  /** learners matching the learner filters */
+  learnerCount: number;
   activity: number[][];
   inRange: (day: number) => boolean;
 }
@@ -23,14 +26,23 @@ export interface Scope {
 export function buildScope(d: Dataset, mode: Mode, filters: Filters): Scope {
   const start = periodStart(filters.period);
   const end = TODAY;
+  const proposed = mode === 'proposed';
   const learnerOk = d.learners.map((l) => {
     if (filters.occupation && l.occupation !== filters.occupation) return false;
     if (filters.workArea && l.workArea !== filters.workArea) return false;
     if (filters.ageGroup && l.ageGroup !== filters.ageGroup) return false;
     if (filters.gender && l.gender !== filters.gender) return false;
     if (filters.prefLang && l.prefLang !== filters.prefLang) return false;
-    if (mode === 'proposed' && filters.org && l.org !== filters.org) return false;
-    if (mode === 'proposed' && filters.device && l.device !== filters.device) return false;
+    if (proposed) {
+      if (filters.instType && l.instType !== filters.instType) return false;
+      if (filters.org && l.org !== filters.org) return false;
+      if (filters.district && l.district !== filters.district) return false;
+      if (filters.municipality && l.municipality !== filters.municipality) return false;
+      if (filters.experience && l.experience !== filters.experience) return false;
+      if (filters.education && l.education !== filters.education) return false;
+      if (filters.foundVia && l.foundVia !== filters.foundVia) return false;
+      if (filters.device && l.device !== filters.device) return false;
+    }
     return true;
   });
   const courseOk = d.courses.map((c) => {
@@ -44,9 +56,10 @@ export function buildScope(d: Dataset, mode: Mode, filters: Filters): Scope {
     return true;
   });
   const segmentActive = LEARNER_FILTER_KEYS.some((k) => {
-    if ((k === 'org' || k === 'device') && mode === 'today') return false;
+    if (PROPOSED_FILTER_KEYS.includes(k) && mode === 'today') return false;
     return filters[k] !== null;
   });
+  const learnerCount = learnerOk.filter(Boolean).length;
   return {
     d,
     mode,
@@ -57,6 +70,7 @@ export function buildScope(d: Dataset, mode: Mode, filters: Filters): Scope {
     courseOk,
     resourceOk,
     segmentActive,
+    learnerCount,
     activity: mode === 'today' ? d.activityToday : d.activityProposed,
     inRange: (day: number) => day >= start && day <= end,
   };
@@ -93,4 +107,10 @@ export function median(values: number[]): number {
 export function mean(values: number[]): number {
   if (!values.length) return NaN;
   return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+/** hides groups smaller than the minimum size, as the framework asks */
+export function suppress<T>(rows: T[], size: (r: T) => number): { shown: T[]; hidden: number } {
+  const shown = rows.filter((r) => size(r) >= MIN_GROUP);
+  return { shown, hidden: rows.length - shown.length };
 }

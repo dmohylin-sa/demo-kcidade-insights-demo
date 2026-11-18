@@ -3,8 +3,17 @@
 
 import type { Scope } from './scope';
 import { ratio, median, mean } from './scope';
-import { TOPICS, CONTENT_LANGS, ASPECTS } from '../data/taxonomy';
+import { TOPICS, CONTENT_LANGS, ASPECTS, AREAS, UNMATCHED_TOPICS } from '../data/taxonomy';
 import type { Question } from '../data/generate';
+import { TODAY, monthIndexOfDay, monthLabel } from './time';
+
+/** the framework counts completion only on enrolments at least this old */
+export const COMPLETION_MIN_AGE = 60;
+
+/** enrolments that reached 60 days in the period: made between 60 days before its start and 60 days before its end */
+export function completionEligible(s: Scope, day: number): boolean {
+  return day >= s.start - COMPLETION_MIN_AGE && day <= s.end - COMPLETION_MIN_AGE;
+}
 
 export interface ActivityEvent {
   learnerId: number;
@@ -34,8 +43,56 @@ export function activityEvents(s: Scope): ActivityEvent[] {
       if (!s.learnerOk[v.learnerId] || !s.courseOk[v.courseId]) continue;
       out.push({ learnerId: v.learnerId, day: v.day });
     }
+    // a tutor conversation is a learning action; it follows learner filters only
+    for (const t of d.tutorConvs) {
+      if (!s.learnerOk[t.learnerId]) continue;
+      out.push({ learnerId: t.learnerId, day: t.day });
+    }
   }
   return out;
+}
+
+export interface MonthActive {
+  mi: number;
+  month: string;
+  active: number;
+  returned: number;
+  returnRate: number;
+  partial: boolean;
+}
+
+/** Monthly active learners (a learning action in the month; a login does not count) and the monthly return rate. */
+export function monthlyActive(s: Scope, events = activityEvents(s)): MonthActive[] {
+  const sets = new Map<number, Set<number>>();
+  for (const e of events) {
+    const mi = monthIndexOfDay(e.day);
+    if (!sets.has(mi)) sets.set(mi, new Set());
+    sets.get(mi)!.add(e.learnerId);
+  }
+  const m0 = monthIndexOfDay(s.start);
+  const m1 = monthIndexOfDay(s.end);
+  const lastMonth = monthIndexOfDay(TODAY);
+  const out: MonthActive[] = [];
+  for (let mi = m0; mi <= m1; mi++) {
+    const cur = sets.get(mi) ?? new Set<number>();
+    const prev = sets.get(mi - 1) ?? new Set<number>();
+    let returned = 0;
+    for (const id of prev) if (cur.has(id)) returned++;
+    out.push({ mi, month: monthLabel(mi), active: cur.size, returned, returnRate: ratio(returned, prev.size), partial: mi === lastMonth });
+  }
+  return out;
+}
+
+/** headline values over the full months of the period (the current month is still running) */
+export function monthlyHeadline(rows: MonthActive[]) {
+  const full = rows.filter((r) => !r.partial);
+  const use = full.length ? full : rows;
+  return {
+    avgActive: mean(use.map((r) => r.active)),
+    avgReturn: mean(use.map((r) => r.returnRate).filter((v) => Number.isFinite(v))),
+    from: use[0]?.month ?? '',
+    to: use[use.length - 1]?.month ?? '',
+  };
 }
 
 export function activeLearners(events: ActivityEvent[], start: number, end: number): number {
@@ -49,6 +106,9 @@ export function activeLearners(events: ActivityEvent[], start: number, end: numb
 export interface CourseStat {
   courseId: number;
   enrolments: number;
+  /** enrolments old enough to count for completion */
+  eligible: number;
+  certificates: number;
   started: number;
   completed: number;
   completionRate: number;
@@ -66,6 +126,8 @@ export function courseStats(s: Scope): CourseStat[] {
     .map((c) => {
       const es = d.enrolments.filter((e) => e.courseId === c.id && s.learnerOk[e.learnerId] && s.inRange(e.day));
       const completed = es.filter((e) => e.completedDay !== null);
+      const eligible = d.enrolments.filter((e) => e.courseId === c.id && s.learnerOk[e.learnerId] && completionEligible(s, e.day));
+      const certificates = d.enrolments.filter((e) => e.courseId === c.id && s.learnerOk[e.learnerId] && e.completedDay !== null && s.inRange(e.completedDay)).length;
       const firsts = d.attempts.filter(
         (a) => a.courseId === c.id && a.attemptNo === 1 && s.learnerOk[a.learnerId] && s.inRange(a.day),
       );
@@ -78,9 +140,11 @@ export function courseStats(s: Scope): CourseStat[] {
       return {
         courseId: c.id,
         enrolments: es.length,
+        eligible: eligible.length,
+        certificates,
         started: es.filter((e) => e.started).length,
         completed: completed.length,
-        completionRate: ratio(completed.length, es.length),
+        completionRate: ratio(eligible.filter((e) => e.completedDay !== null).length, eligible.length),
         medianDays: median(completed.map((e) => (e.completedDay as number) - e.day)),
         firstPass: ratio(firsts.filter((a) => a.passed).length, firsts.length),
         satisfaction: mean(sv.map((x) => mean(x.scores))),
@@ -250,7 +314,7 @@ export interface Signal {
   title: string;
   detail: string;
   path: string;
-  kind: 'course' | 'quiz' | 'topic' | 'language' | 'satisfaction';
+  kind: 'course' | 'quiz' | 'topic' | 'language' | 'satisfaction' | 'search' | 'triangulation';
 }
 
 export function signals(s: Scope): Signal[] {
@@ -341,13 +405,93 @@ export function signals(s: Scope): Signal[] {
       out.push({
         key: 'satisfaction',
         kind: 'satisfaction',
-        title: `${ASPECTS[l.k]} scores ${l.v.toFixed(1)} out of 5`,
-        detail: `The lowest aspect of any course: "${d.courses[l.courseId].title}".`,
+        title: `"${ASPECTS[l.k]}" scores ${l.v.toFixed(1)} out of 5`,
+        detail: `The lowest end-of-course score of any course: "${d.courses[l.courseId].title}".`,
         path: '/feedback',
+      });
+    }
+
+    // most frequent search or tutor question with nothing to offer
+    const counts = UNMATCHED_TOPICS.map(() => 0);
+    for (const x of d.searches) if (x.unmatched >= 0 && s.learnerOk[x.learnerId] && s.inRange(x.day)) counts[x.unmatched]++;
+    for (const t of d.tutorConvs) if (t.unmatched >= 0 && t.group >= 0 && s.learnerOk[t.learnerId] && s.inRange(t.day)) counts[t.unmatched]++;
+    const top = counts.indexOf(Math.max(...counts));
+    if (counts[top] > 0) {
+      out.push({
+        key: 'search',
+        kind: 'search',
+        title: `"${UNMATCHED_TOPICS[top]}": asked ${counts[top]} times, no resource`,
+        detail: 'Library searches with no results and tutor questions with no matching resource point at the same topic.',
+        path: '/gaps',
+      });
+    }
+
+    const closer = triangulation(s).find((t) => t.verdict === 'closer');
+    if (closer) {
+      out.push({
+        key: 'triangulation',
+        kind: 'triangulation',
+        title: 'Learners report change, observers see little',
+        detail: `"${closer.area}": ${fmtShare(closer.use)} of follow-up respondents use it in their work, but managers and trainers rate the practice ${closer.observed.toFixed(1)} of 4.`,
+        path: '/triangulation',
       });
     }
   }
   return out;
+}
+
+function fmtShare(v: number): string {
+  return Number.isFinite(v) ? `${Math.round(v * 100)}%` : '-';
+}
+
+// ---------------------------------------------------------------- triangulation (Levels 2, 3-4 and Layer 5)
+
+export type Verdict = 'strong' | 'mixed' | 'closer' | 'thin';
+export const VERDICT_META: Record<Verdict, { label: string; color: string; text: string }> = {
+  strong: { label: 'Strong', color: 'green', text: 'All three kinds of evidence point the same way.' },
+  mixed: { label: 'Mixed', color: 'gold', text: 'The sources partly agree.' },
+  closer: { label: 'Needs a closer look', color: 'red', text: 'Learners report change, but others do not see it.' },
+  thin: { label: 'Not enough evidence yet', color: 'default', text: 'Too few follow-up answers or team records.' },
+};
+
+export interface TriRow {
+  areaId: number;
+  area: string;
+  completion: number;
+  firstPass: number;
+  platformOk: boolean;
+  use: number;
+  useN: number;
+  observed: number;
+  observedN: number;
+  /** a course in the area is selected for follow-up */
+  fuSelected: boolean;
+  verdict: Verdict;
+}
+
+/** Per learning area: platform records, learners' reports and outside observation. Follow-ups and team records use everything to date. */
+export function triangulation(s: Scope): TriRow[] {
+  const { d } = s;
+  return AREAS.filter((a) => s.filters.area === null || a.id === s.filters.area).map((a) => {
+    const cids = new Set(d.courses.filter((c) => c.areaId === a.id).map((c) => c.id));
+    const es = d.enrolments.filter((e) => cids.has(e.courseId) && s.learnerOk[e.learnerId] && completionEligible(s, e.day));
+    const completion = ratio(es.filter((e) => e.completedDay !== null).length, es.length);
+    const firsts = d.attempts.filter((x) => cids.has(x.courseId) && x.attemptNo === 1 && s.learnerOk[x.learnerId] && s.inRange(x.day));
+    const firstPass = ratio(firsts.filter((x) => x.passed).length, firsts.length);
+    const fu = d.followUps.filter((f) => cids.has(f.courseId) && f.answered && s.learnerOk[f.learnerId]);
+    const use = ratio(fu.filter((f) => f.use <= 1).length, fu.length);
+    const recs = d.l5.filter((x) => x.areaId === a.id);
+    const ratings = recs.flatMap((x) => x.ratings.filter((r) => r > 0));
+    const observed = mean(ratings);
+    const platformOk = completion >= 0.3 && firstPass >= 0.55;
+    let verdict: Verdict;
+    if (fu.length < 5 || recs.length < 2) verdict = 'thin';
+    else if (use >= 0.6 && observed < 2.5) verdict = 'closer';
+    else if (platformOk && use >= 0.6 && observed >= 2.9) verdict = 'strong';
+    else verdict = 'mixed';
+    const fuSelected = d.followUpCourses.flat().some((cid) => cids.has(cid));
+    return { areaId: a.id, area: a.name, completion, firstPass, platformOk, use, useN: fu.length, observed, observedN: recs.length, fuSelected, verdict };
+  });
 }
 
 // ---------------------------------------------------------------- resource use

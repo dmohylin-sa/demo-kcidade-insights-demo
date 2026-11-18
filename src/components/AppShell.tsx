@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { Layout, Menu, Segmented, Button, Tooltip, type MenuProps } from 'antd';
+import { Layout, Menu, Segmented, Button, Tooltip, ConfigProvider, type MenuProps } from 'antd';
 import {
   DashboardOutlined,
   ReadOutlined,
@@ -13,6 +13,11 @@ import {
   TeamOutlined,
   DatabaseOutlined,
   ProfileOutlined,
+  GlobalOutlined,
+  MessageOutlined,
+  DeploymentUnitOutlined,
+  AppstoreOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PAGES, type PageKey } from '../data/registry';
@@ -22,8 +27,23 @@ import geniuseeLogo from '../assets/geniusee-logo.svg';
 
 const { Header, Sider, Content } = Layout;
 
+const MODE_SWITCH_TOKENS = {
+  trackBg: 'rgba(255,255,255,0.12)',
+  itemColor: 'rgba(255,255,255,0.82)',
+  itemHoverColor: '#ffffff',
+  itemHoverBg: 'rgba(255,255,255,0.16)',
+  itemActiveBg: 'rgba(255,255,255,0.24)',
+  itemSelectedBg: '#ffffff',
+  itemSelectedColor: '#16171A',
+};
+
 const ICONS: Record<PageKey, ReactNode> = {
   overview: <DashboardOutlined />,
+  access: <GlobalOutlined />,
+  tutor: <MessageOutlined />,
+  triangulation: <DeploymentUnitOutlined />,
+  evidence: <AppstoreOutlined />,
+  audiences: <EyeOutlined />,
   courses: <ReadOutlined />,
   quizzes: <CheckSquareOutlined />,
   materials: <PlayCircleOutlined />,
@@ -90,15 +110,20 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <div className="header-spacer" />
         <span className="mode-label">Show</span>
         <Tooltip title="Switch between what the platform records today and what the proposed additions unlock (shortcut: T)">
-          <Segmented
-            className="mode-switch"
-            value={mode}
-            onChange={(v) => setMode(v as Mode)}
-            options={[
-              { value: 'today', label: "Today's data" },
-              { value: 'proposed', label: 'With proposed additions' },
-            ]}
-          />
+          <span>
+            {/* the switch sits on the dark header: light text, and hover keeps it light */}
+            <ConfigProvider theme={{ components: { Segmented: MODE_SWITCH_TOKENS } }}>
+              <Segmented
+                className="mode-switch"
+                value={mode}
+                onChange={(v) => setMode(v as Mode)}
+                options={[
+                  { value: 'today', label: "Today's data" },
+                  { value: 'proposed', label: 'With proposed additions' },
+                ]}
+              />
+            </ConfigProvider>
+          </span>
         </Tooltip>
       </Header>
       <Layout>

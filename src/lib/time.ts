@@ -45,11 +45,12 @@ export function formatDay(day: number): string {
   return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
-export type PeriodKey = '30d' | '90d' | '12m' | 'all';
+export type PeriodKey = '30d' | '90d' | '6m' | '12m' | 'all';
 
 export const PERIODS: { key: PeriodKey; label: string; days: number }[] = [
   { key: '30d', label: 'Last 30 days', days: 30 },
   { key: '90d', label: 'Last 90 days', days: 90 },
+  { key: '6m', label: 'Last 6 months', days: 182 },
   { key: '12m', label: 'Last 12 months', days: 365 },
   { key: 'all', label: 'All time', days: TODAY + 1 },
 ];

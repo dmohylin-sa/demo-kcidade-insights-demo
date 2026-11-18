@@ -1,14 +1,15 @@
 import { useMemo } from 'react';
 import { Row, Col, Select, Table, Slider, Tag, Tooltip as AntTooltip, Space, Statistic } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LabelList, Cell, AreaChart, Area } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LabelList, Cell } from 'recharts';
 import FilterBar from '../components/FilterBar';
 import { ChartCard, PageHead, Legend, InlineBar, NoData } from '../components/ui';
 import { axisProps, yAxisProps, gridProps, intTooltip, makeTooltip, BAR_RADIUS, pctTick } from '../components/viz';
-import { useScope, fmtInt, fmtPct, ratio, median } from '../lib/scope';
-import { courseStats } from '../lib/metrics';
+import { useScope, fmtInt, fmtPct, ratio, median, mean } from '../lib/scope';
+import { courseStats, activityEvents } from '../lib/metrics';
 import { useStore } from '../lib/store';
-import { monthIndexOfDay, monthLabel, weekIndexOfDay, weekLabel, formatDay, TODAY } from '../lib/time';
+import { monthIndexOfDay, monthLabel, formatDay, TODAY } from '../lib/time';
+import { BADGES } from '../data/generate';
 import { AREAS } from '../data/taxonomy';
 import { page } from '../data/registry';
 import { SERIES, ORDINAL, INK, areaColor, STATUS_COLORS } from '../lib/palette';
@@ -75,19 +76,35 @@ export default function Courses() {
       if (i > 0 && (maxDropIdx < 0 || l.drop > lessons[maxDropIdx].drop)) maxDropIdx = i;
     });
 
-    const w0 = weekIndexOfDay(s.start);
-    const w1 = weekIndexOfDay(s.end);
-    const weekMap = new Map<number, number>();
-    for (const e of d.enrolments) {
-      if (!s.learnerOk[e.learnerId] || !s.courseOk[e.courseId]) continue;
-      e.lessonDays.forEach((day, i) => {
-        if (!s.inRange(day)) return;
-        const w = weekIndexOfDay(day);
-        weekMap.set(w, (weekMap.get(w) ?? 0) + (e.timerMin[i] ?? 0));
-      });
+    // active days per learner and month (days with a learning action)
+    const events = activityEvents(s);
+    const days = new Map<string, Set<number>>();
+    for (const e of events) {
+      if (!s.inRange(e.day)) continue;
+      const key = `${monthIndexOfDay(e.day)}:${e.learnerId}`;
+      if (!days.has(key)) days.set(key, new Set());
+      days.get(key)!.add(e.day);
     }
-    const weekly = [];
-    for (let w = w0; w <= w1; w++) weekly.push({ week: weekLabel(w), hours: Math.round((weekMap.get(w) ?? 0) / 6) / 10 });
+    const perMonth = new Map<number, number[]>();
+    for (const [key, set] of days) {
+      const mi = Number(key.split(':')[0]);
+      if (!perMonth.has(mi)) perMonth.set(mi, []);
+      perMonth.get(mi)!.push(set.size);
+    }
+    const activeDays = [];
+    for (let mi = m0; mi <= m1; mi++) {
+      const arr = perMonth.get(mi) ?? [];
+      activeDays.push({ month: monthLabel(mi), days: Math.round(mean(arr) * 10) / 10 || 0, learners: arr.length });
+    }
+
+    // badges (GamiPress) and certificates (LearnDash)
+    const earned = d.badges.filter((b) => s.learnerOk[b.learnerId] && s.inRange(b.day));
+    const earners = new Set(earned.map((b) => b.learnerId)).size;
+    const badges = BADGES.map((b) => ({ name: b, value: earned.filter((x) => x.badge === b).length })).sort((a, b) => b.value - a.value);
+    const certificates = stats
+      .map((c) => ({ name: d.courses[c.courseId].title, value: c.certificates }))
+      .filter((c) => c.value > 0)
+      .sort((a, b) => b.value - a.value);
 
     const risk = d.enrolments
       .filter(
@@ -111,7 +128,7 @@ export default function Courses() {
       (e) => s.learnerOk[e.learnerId] && s.courseOk[e.courseId] && e.completedDay === null && TODAY - e.lastActivityDay >= 90,
     ).length;
 
-    return { stats, monthly, areasShown, funnel, lessons, maxDropIdx, time, weekly, risk, dropped };
+    return { stats, monthly, areasShown, funnel, lessons, maxDropIdx, time, activeDays, risk, dropped, badges, earners, avgBadges: ratio(earned.length, earners), certificates };
   }, [s, selected, riskDays, d]);
 
   const courseSelect = (
@@ -177,13 +194,14 @@ export default function Courses() {
                   sorter: (a, b) => (a.medianDays || 0) - (b.medianDays || 0),
                 },
                 { title: 'First-attempt pass', dataIndex: 'firstPass', align: 'right', render: (v: number) => fmtPct(v), sorter: (a, b) => (a.firstPass || 0) - (b.firstPass || 0) },
+                { title: 'Certificates', dataIndex: 'certificates', align: 'right', sorter: (a, b) => a.certificates - b.certificates },
                 {
                   title: 'Satisfaction',
                   dataIndex: 'satisfaction',
                   align: 'right',
                   render: (v: number) =>
                     s.mode === 'today' ? (
-                      <AntTooltip title="Needs the course survey">
+                      <AntTooltip title="Needs the end-of-course survey">
                         <LockOutlined style={{ color: INK.muted }} />
                       </AntTooltip>
                     ) : Number.isFinite(v) ? (
@@ -195,7 +213,7 @@ export default function Courses() {
                 },
               ]}
             />
-            <div className="chart-note">Click a course to see its funnel and lessons below. Completion rate counts the enrolments made in the period.</div>
+            <div className="chart-note">Click a course to see its funnel and lessons below. Completion rate counts enrolments that reached 60 days in the period. 93 of 100 lessons complete when the video ends: read completion next to the first-attempt pass rate.</div>
           </ChartCard>
         </Col>
 
@@ -318,15 +336,21 @@ export default function Courses() {
           </ChartCard>
         </Col>
         <Col xs={24} lg={12}>
-          <ChartCard id="co-timeweek" table={{ columns: [{ key: 'week', title: 'Week starting' }, { key: 'hours', title: 'Hours', align: 'right' }], rows: m.weekly }}>
+          <ChartCard
+            id="co-activedays"
+            table={{ columns: [{ key: 'month', title: 'Month' }, { key: 'learners', title: 'Active learners', align: 'right' }, { key: 'days', title: 'Active days per learner', align: 'right' }], rows: m.activeDays }}
+            note="Average number of days with a learning action, per active learner and month."
+          >
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={m.weekly} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+              <BarChart data={m.activeDays} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...gridProps} />
-                <XAxis dataKey="week" {...axisProps} minTickGap={28} />
-                <YAxis {...yAxisProps} unit=" h" />
-                <Tooltip content={makeTooltip((v) => `${v} h`)} />
-                <Area type="monotone" dataKey="hours" name="Learning time" stroke={SERIES[0]} strokeWidth={2} fill={SERIES[0]} fillOpacity={0.1} dot={false} />
-              </AreaChart>
+                <XAxis dataKey="month" {...axisProps} />
+                <YAxis {...yAxisProps} />
+                <Tooltip content={makeTooltip((v) => `${v} days`)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                <Bar dataKey="days" name="Active days per learner" fill={SERIES[0]} radius={BAR_RADIUS} maxBarSize={24}>
+                  <LabelList dataKey="days" position="top" style={{ fill: INK.secondary, fontSize: 11, fontWeight: 600 }} />
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </ChartCard>
         </Col>
@@ -357,7 +381,40 @@ export default function Courses() {
                 { title: 'Days inactive', dataIndex: 'days', align: 'right' },
               ]}
             />
-            <div className="chart-note">Learner IDs are pseudonymous, as in the reporting system. Contacting a learner happens in WordPress.</div>
+            <div className="chart-note">Learner IDs are pseudonymous. Individual views are for the platform team only, with a separate permission; contacting a learner happens in WordPress.</div>
+          </ChartCard>
+        </Col>
+
+        <Col xs={24} lg={12}>
+          <ChartCard id="co-badges" table={{ columns: [{ key: 'name', title: 'Badge' }, { key: 'value', title: 'Earned', align: 'right' }], rows: m.badges }} note={`${fmtInt(m.earners)} learners earned a badge in the period, ${Number.isFinite(m.avgBadges) ? m.avgBadges.toFixed(1) : '-'} on average.`}>
+            <ResponsiveContainer width="100%" height={230}>
+              <BarChart data={m.badges} layout="vertical" margin={{ top: 0, right: 44, left: 0, bottom: 0 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" {...yAxisProps} width={170} interval={0} tick={{ fill: INK.secondary, fontSize: 12 }} />
+                <Tooltip content={intTooltip} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                <Bar dataKey="value" name="Earned" fill={SERIES[3]} radius={[0, 4, 4, 0]} maxBarSize={18}>
+                  <LabelList dataKey="value" position="right" style={{ fill: INK.secondary, fontSize: 11, fontWeight: 600 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </Col>
+        <Col xs={24} lg={12}>
+          <ChartCard id="co-certificates" table={{ columns: [{ key: 'name', title: 'Course' }, { key: 'value', title: 'Certificates', align: 'right' }], rows: m.certificates }}>
+            {m.certificates.length ? (
+              <ResponsiveContainer width="100%" height={Math.max(200, Math.min(8, m.certificates.length) * 30)}>
+                <BarChart data={m.certificates.slice(0, 8)} layout="vertical" margin={{ top: 0, right: 44, left: 0, bottom: 0 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="name" {...yAxisProps} width={250} interval={0} tick={{ fill: INK.secondary, fontSize: 12 }} />
+                  <Tooltip content={intTooltip} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+                  <Bar dataKey="value" name="Certificates" fill={SERIES[0]} radius={[0, 4, 4, 0]} maxBarSize={18}>
+                    <LabelList dataKey="value" position="right" style={{ fill: INK.secondary, fontSize: 11, fontWeight: 600 }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <NoData />
+            )}
           </ChartCard>
         </Col>
       </Row>

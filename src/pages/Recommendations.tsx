@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Row, Col, Statistic } from 'antd';
+import { ArrowRightOutlined } from '@ant-design/icons';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LabelList, Cell } from 'recharts';
 import FilterBar from '../components/FilterBar';
 import { ChartCard, PageHead, Legend, SegBar } from '../components/ui';
@@ -7,6 +8,8 @@ import { axisProps, yAxisProps, gridProps, makeTooltip, BAR_RADIUS, HBAR_RADIUS,
 import { useScope, fmtInt, fmtPct, ratio, mean } from '../lib/scope';
 import { monthOverlap } from '../lib/metrics';
 import { CAROUSELS } from '../data/taxonomy';
+import { PLATFORM_SURVEY_MONTHS } from '../data/generate';
+import { monthLabel } from '../lib/time';
 import { page } from '../data/registry';
 import { SERIES, INK } from '../lib/palette';
 
@@ -42,14 +45,17 @@ export default function Recommendations() {
     const viaRec = es.filter((e) => e.viaRec);
     const notRec = es.filter((e) => !e.viaRec);
 
-    const sv = d.surveys.filter((x) => x.answered && s.learnerOk[x.learnerId] && s.courseOk[x.courseId] && s.inRange(x.answerDay));
-    const svM = sv.filter((x) => d.enrolments[x.enrolmentId].matched);
-    const svO = sv.filter((x) => !d.enrolments[x.enrolmentId].matched);
+    // platform survey: "The learning paths suggested to me match the interests I gave at registration"
+    const ps = d.platformSurveys.filter((x) => x.answered && s.learnerOk[x.learnerId] && x.items.paths !== undefined);
+    const w0 = ps.filter((x) => x.wave === 0);
+    const w1 = ps.filter((x) => x.wave === 1);
     const relevance = [1, 2, 3, 4, 5].map((score) => ({
       score: String(score),
-      matched: ratio(svM.filter((x) => x.relevance === score).length, svM.length),
-      other: ratio(svO.filter((x) => x.relevance === score).length, svO.length),
+      matched: ratio(w0.filter((x) => x.items.paths === score).length, w0.length),
+      other: ratio(w1.filter((x) => x.items.paths === score).length, w1.length),
     }));
+    const clicks = car.reduce((a, b) => a + b.clicks, 0);
+    const shownTotal = car.reduce((a, b) => a + b.shown, 0);
 
     return {
       total: es.length,
@@ -67,8 +73,16 @@ export default function Recommendations() {
       ],
       recShare: ratio(viaRec.length, es.length),
       relevance,
-      relM: mean(svM.map((x) => x.relevance)),
-      relO: mean(svO.map((x) => x.relevance)),
+      relM: mean(w0.map((x) => x.items.paths as number)),
+      relO: mean(w1.map((x) => x.items.paths as number)),
+      nW0: w0.length,
+      nW1: w1.length,
+      uptake: [
+        { label: 'Items shown', value: Math.round(shownTotal) },
+        { label: 'Clicked', value: Math.round(clicks) },
+        { label: 'Enrolled', value: viaRec.length },
+        { label: 'Completed', value: viaRec.filter((e) => e.completedDay !== null).length },
+      ],
     };
   }, [s, d]);
 
@@ -113,6 +127,31 @@ export default function Recommendations() {
             note="Association, not proof: learners who pick courses on their own interests may also be more motivated."
           >
             {twoBars(m.completion, [SERIES[0], INK.neutralBar])}
+          </ChartCard>
+        </Col>
+
+        <Col xs={24}>
+          <ChartCard
+            id="rc-uptake"
+            table={{ columns: [{ key: 'label', title: 'Step' }, { key: 'value', title: 'Count', align: 'right', render: fmtInt }], rows: m.uptake }}
+            note="Enrolled: within 7 days of a click on the same course (the window is to be agreed). Completed: of those enrolments."
+          >
+            <div className="uptake">
+              {m.uptake.map((u, i) => (
+                <div className="uptake-step" key={u.label}>
+                  {i > 0 ? (
+                    <div className="uptake-arrow">
+                      <ArrowRightOutlined />
+                      <span>{fmtPct(ratio(u.value, m.uptake[i - 1].value), i === 1 ? 1 : 0)}</span>
+                    </div>
+                  ) : null}
+                  <div className="uptake-box" style={{ borderTopColor: SERIES[0] }}>
+                    <div className="uptake-label">{u.label}</div>
+                    <div className="uptake-value">{fmtInt(u.value)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </ChartCard>
         </Col>
 
@@ -177,17 +216,17 @@ export default function Recommendations() {
             table={{
               columns: [
                 { key: 'score', title: 'Score (1-5)' },
-                { key: 'matched', title: 'Matches interests', align: 'right', render: (v: number) => fmtPct(v) },
-                { key: 'other', title: 'Does not match', align: 'right', render: (v: number) => fmtPct(v) },
+                { key: 'matched', title: monthLabel(PLATFORM_SURVEY_MONTHS[0]), align: 'right', render: (v: number) => fmtPct(v) },
+                { key: 'other', title: monthLabel(PLATFORM_SURVEY_MONTHS[1]), align: 'right', render: (v: number) => fmtPct(v) },
               ],
               rows: m.relevance,
             }}
-            note={`Average: ${Number.isFinite(m.relM) ? m.relM.toFixed(1) : '-'} when the course matches the learner's interests, ${Number.isFinite(m.relO) ? m.relO.toFixed(1) : '-'} when it does not.`}
+            note={`"The learning paths suggested to me match the interests I gave at registration." Average ${Number.isFinite(m.relM) ? m.relM.toFixed(1) : '-'} in ${monthLabel(PLATFORM_SURVEY_MONTHS[0])} (${m.nW0} answers), ${Number.isFinite(m.relO) ? m.relO.toFixed(1) : '-'} in ${monthLabel(PLATFORM_SURVEY_MONTHS[1])} (${m.nW1}).`}
           >
             <Legend
               items={[
-                { label: 'Course matches interests', color: SERIES[0] },
-                { label: 'Does not match', color: SERIES[1] },
+                { label: `Platform survey ${monthLabel(PLATFORM_SURVEY_MONTHS[0])}`, color: SERIES[1] },
+                { label: `Platform survey ${monthLabel(PLATFORM_SURVEY_MONTHS[1])}`, color: SERIES[0] },
               ]}
             />
             <ResponsiveContainer width="100%" height={200}>
@@ -195,9 +234,9 @@ export default function Recommendations() {
                 <CartesianGrid {...gridProps} />
                 <XAxis dataKey="score" {...axisProps} />
                 <YAxis {...yAxisProps} tickFormatter={pctTick} />
-                <Tooltip content={makeTooltip((v) => fmtPct(v))} cursor={{ fill: 'rgba(0,0,0,0.03)' }} labelFormatter={(l) => `Relevance ${l} of 5`} />
-                <Bar dataKey="matched" name="Matches interests" fill={SERIES[0]} radius={BAR_RADIUS} maxBarSize={24} />
-                <Bar dataKey="other" name="Does not match" fill={SERIES[1]} radius={BAR_RADIUS} maxBarSize={24} />
+                <Tooltip content={makeTooltip((v) => fmtPct(v))} cursor={{ fill: 'rgba(0,0,0,0.03)' }} labelFormatter={(l) => `Score ${l} of 5`} />
+                <Bar dataKey="matched" name={monthLabel(PLATFORM_SURVEY_MONTHS[0])} fill={SERIES[1]} radius={BAR_RADIUS} maxBarSize={24} />
+                <Bar dataKey="other" name={monthLabel(PLATFORM_SURVEY_MONTHS[1])} fill={SERIES[0]} radius={BAR_RADIUS} maxBarSize={24} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>

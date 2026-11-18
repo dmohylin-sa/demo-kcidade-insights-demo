@@ -11,6 +11,11 @@ import Feedback from './pages/Feedback';
 import Impact from './pages/Impact';
 import Communities from './pages/Communities';
 import Readiness from './pages/Readiness';
+import Access from './pages/Access';
+import Tutor from './pages/Tutor';
+import Triangulation from './pages/Triangulation';
+import Evidence from './pages/Evidence';
+import Audiences from './pages/Audiences';
 
 export default function App() {
   return (
@@ -28,6 +33,11 @@ export default function App() {
           <Route path="/impact" element={<Impact />} />
           <Route path="/communities" element={<Communities />} />
           <Route path="/readiness" element={<Readiness />} />
+          <Route path="/access" element={<Access />} />
+          <Route path="/tutor" element={<Tutor />} />
+          <Route path="/triangulation" element={<Triangulation />} />
+          <Route path="/evidence" element={<Evidence />} />
+          <Route path="/audiences" element={<Audiences />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell>
